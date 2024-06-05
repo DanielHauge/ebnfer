@@ -1,4 +1,6 @@
 pub mod ebnf {
+    use std::usize;
+
     use crate::lsp::lsp::LspContext;
     use nom::{
         branch::alt,
@@ -8,7 +10,7 @@ pub mod ebnf {
         error::{VerboseError, VerboseErrorKind},
         multi::{many0_count, many1},
         sequence::{delimited, pair, preceded, terminated},
-        Err, IResult,
+        Err, IResult, Offset,
     };
     use parse_hyperlinks::take_until_unbalanced;
 
@@ -27,14 +29,14 @@ pub mod ebnf {
     #[derive(Debug, Clone)]
     pub enum Expression {
         Optional(Box<Expression>),
-        NonTerminal(String),
-        Terminal(String),
+        Term(String),
+        NonTerm(String, usize),
         Regex(String),
         Repeated(Box<Expression>),
         Symbol(Box<Expression>, SymbolKind, Box<Expression>),
         RegexExt(Box<Expression>, RegexExtKind),
-        SpecialSequence(String),
-        Comment(String),
+        // SpecialSequence(String),
+        // Comment(String),
         Group(Box<Expression>),
         Multiple(Vec<Expression>),
     }
@@ -69,14 +71,35 @@ pub mod ebnf {
         Ok((rest, lhs))
     }
 
-    fn parse_rhs<'a>(lsp_context: &mut LspContext<'a>, input: &'a str) -> Res<&'a str, Expression> {
-        lsp_context.add_hover("lhs", "rhs");
-        let (input, rhs) = preceded(
-            multispace0,
-            terminated(parse_multiple, preceded(multispace0, char(';'))),
-        )(input)?;
+    fn find_non_terminals(rhs: &Expression) -> Vec<usize> {
+        match rhs {
+            Expression::Optional(o) => find_non_terminals(o),
+            Expression::NonTerm(_, ptr) => vec![*ptr],
+            Expression::Repeated(x) => find_non_terminals(x),
+            Expression::Symbol(a, _, b) => {
+                let mut non_terminals = find_non_terminals(a);
+                non_terminals.extend(find_non_terminals(b));
+                non_terminals
+            }
+            Expression::Group(g) => find_non_terminals(g),
+            Expression::Multiple(a) => a.iter().map(|e| find_non_terminals(e)).flatten().collect(),
+            _ => vec![],
+        }
+    }
 
-        Ok((input, rhs))
+    fn parse_rhs<'a>(lsp_context: &mut LspContext<'a>, input: &'a str) -> Res<&'a str, Expression> {
+        // Make closure to parse multiple expressions passing in the lsp_context
+        let (input, _) = multispace0(input)?;
+        let start_rhs = input;
+        let (rest, rhs) = terminated(parse_multiple, preceded(multispace0, char(';')))(input)?;
+        // Recursively go through the rhs and find all NonTerminals
+        let rhs_str = &start_rhs[..start_rhs.offset(rest)];
+        lsp_context.complete_hover(rhs_str);
+        let non_terminals = find_non_terminals(&rhs);
+        for nt in non_terminals {
+            lsp_context.add_reference(rhs_str, lsp_context.offset_from_ptr(nt));
+        }
+        Ok((rest, rhs))
     }
 
     fn parse_expression(input: &str) -> Res<&str, Expression> {
@@ -86,9 +109,9 @@ pub mod ebnf {
                 parse_group,
                 parse_optional,
                 parse_repeat,
-                parse_string,
-                parse_regex_string,
                 parse_terminal,
+                parse_regex_string,
+                parse_non_terminal,
             )),
         )(input)?;
 
@@ -101,7 +124,6 @@ pub mod ebnf {
             }
             Err(_) => {}
         }
-
         let optional_symbol: Res<&str, (SymbolKind, Expression)> = parse_symbol(input);
 
         match optional_symbol {
@@ -113,7 +135,7 @@ pub mod ebnf {
         }
     }
 
-    fn parse_string(input: &str) -> Res<&str, Expression> {
+    fn parse_terminal(input: &str) -> Res<&str, Expression> {
         let (input, string) = alt((
             delimited(
                 char('\''),
@@ -126,8 +148,7 @@ pub mod ebnf {
                 char('"'),
             ),
         ))(input)?;
-
-        Ok((input, Expression::NonTerminal(string.to_string())))
+        Ok((input, Expression::Term(string.to_string())))
     }
 
     fn parse_regex_string(input: &str) -> Res<&str, Expression> {
@@ -147,11 +168,11 @@ pub mod ebnf {
         Ok((input, Expression::Regex(string.to_string())))
     }
 
-    fn parse_terminal(input: &str) -> Res<&str, Expression> {
+    fn parse_non_terminal(input: &str) -> Res<&str, Expression> {
         let (input, symbol) =
             preceded(multispace0, terminated(parse_identifer, multispace0))(input)?;
-
-        Ok((input, Expression::Terminal(symbol.to_string())))
+        let ref_loc = symbol.as_ptr() as usize;
+        Ok((input, Expression::NonTerm(symbol.to_string(), ref_loc)))
     }
 
     fn parse_regex_ext(input: &str) -> Res<&str, RegexExtKind> {
@@ -176,13 +197,13 @@ pub mod ebnf {
     }
 
     fn parse_concatenation(input: &str) -> Res<&str, (SymbolKind, Expression)> {
-        let (input, node) = preceded(char(','), parse_expression)(input)?;
+        let (input, node) = preceded(char(','), parse_multiple)(input)?;
 
         Ok((input, (SymbolKind::Concatenation, node)))
     }
 
     fn parse_alternation(input: &str) -> Res<&str, (SymbolKind, Expression)> {
-        let (input, node) = preceded(char('|'), parse_expression)(input)?;
+        let (input, node) = preceded(char('|'), parse_multiple)(input)?;
 
         Ok((input, (SymbolKind::Alternation, node)))
     }
@@ -211,6 +232,7 @@ pub mod ebnf {
 
     fn parse_group(input: &str) -> Res<&str, Expression> {
         let (input, inner) = parse_delimited_node(input, '(', ')')?;
+
         let (_, node) = preceded(multispace0, parse_multiple)(inner)?;
 
         Ok((input, Expression::Group(Box::new(node))))
@@ -218,6 +240,7 @@ pub mod ebnf {
 
     fn parse_optional(input: &str) -> Res<&str, Expression> {
         let (input, inner) = parse_delimited_node(input, '[', ']')?;
+
         let (_, node) = preceded(multispace0, parse_multiple)(inner)?;
 
         Ok((input, Expression::Optional(Box::new(node))))
@@ -225,7 +248,9 @@ pub mod ebnf {
 
     fn parse_repeat(input: &str) -> Res<&str, Expression> {
         let (input, inner) = parse_delimited_node(input, '{', '}')?;
-        let (_, node) = preceded(multispace0, parse_multiple)(inner)?;
+        let parse_multi_lsp_context_applied = move |input| parse_multiple(input);
+
+        let (_, node) = preceded(multispace0, parse_multi_lsp_context_applied)(inner)?;
 
         Ok((input, Expression::Repeated(Box::new(node))))
     }

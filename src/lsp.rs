@@ -5,7 +5,7 @@ pub mod lsp {
     use nom::Offset;
     use rangemap::RangeMap;
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Clone)]
     pub struct Location {
         pub line: usize,
         pub col: usize,
@@ -25,6 +25,7 @@ pub mod lsp {
         references: HashMap<&'a str, Vec<Location>>,
         new_lines_map: BTreeMap<usize, usize>, // Offset -> Line number
         symbols: RangeMap<usize, &'a str>,
+        last_lhs: Option<&'a str>,
     }
 
     impl<'a> LspContext<'a> {
@@ -44,10 +45,15 @@ pub mod lsp {
                 references: HashMap::new(),
                 new_lines_map: lines_offset_tree,
                 symbols: RangeMap::new(),
+                last_lhs: None,
             }
         }
 
-        fn location_at_offset(&self, offset: usize) -> Location {
+        pub fn offset_from_ptr(&self, ptr: usize) -> usize {
+            ptr - self.doc_content.as_ptr() as usize
+        }
+
+        pub fn location_at_offset(&self, offset: usize) -> Location {
             let line_offsets = self
                 .new_lines_map
                 .range((Included(0), Included(offset)))
@@ -71,14 +77,21 @@ pub mod lsp {
             let offset = self.doc_content.offset(rule);
             self.definitions
                 .insert(rule, self.location_at_offset(offset));
-            self.symbols.insert(offset..offset + rule.len(), rule)
+            self.symbols.insert(offset..offset + rule.len(), rule);
+            self.last_lhs = Some(rule)
         }
 
-        pub fn add_hover(&mut self, rule: &'a str, production: &'a str) {
-            self.hover.insert(rule, production);
+        pub fn complete_hover(&mut self, production: &'a str) {
+            match self.last_lhs {
+                Some(lhs) => {
+                    self.hover.insert(lhs, production);
+                }
+                None => {}
+            }
         }
 
-        pub fn add_reference(&mut self, rule: &'a str, location: Location) {
+        pub fn add_reference(&mut self, rule: &'a str, ptr_loc: usize) {
+            let location = self.location_at_offset(ptr_loc);
             self.references.entry(rule).or_insert(vec![]).push(location);
         }
     }
@@ -113,10 +126,8 @@ pub mod lsp {
             let content = "Hello, World! dsad hjaskda hakhjdsah Hello, World!";
             let mut lsp_context = crate::lsp::lsp::LspContext::new(content);
             let world_identifier = &content[7..12];
-            let loc = Location { line: 0, col: 7 };
-            let loc2 = Location { line: 0, col: 31 };
-            lsp_context.add_reference(world_identifier, loc);
-            lsp_context.add_reference(world_identifier, loc2);
+            lsp_context.add_reference(world_identifier, 7);
+            lsp_context.add_reference(world_identifier, 31);
             assert_eq!(
                 lsp_context.references.get(world_identifier).unwrap(),
                 &vec![Location { line: 0, col: 7 }, Location { line: 0, col: 31 }]
@@ -152,7 +163,8 @@ pub mod lsp {
         #[test]
         fn test_add_hover() {
             let mut lsp_context = crate::lsp::lsp::LspContext::new("Hello, World!");
-            lsp_context.add_hover("GG", "wp");
+            lsp_context.add_definition("GG");
+            lsp_context.complete_hover("wp");
             assert_eq!(lsp_context.hover.len(), 1);
             assert_eq!(lsp_context.hover.get("GG").unwrap(), &"wp");
         }
