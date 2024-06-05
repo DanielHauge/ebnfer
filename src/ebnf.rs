@@ -59,12 +59,13 @@ pub mod ebnf {
     fn parse_identifer(input: &str) -> Res<&str, &str> {
         recognize(pair(
             alt((alpha1, tag("_"))),
-            many0_count(alt((alphanumeric1, tag("_")))),
+            many0_count(alt((alphanumeric1, alt((tag("_"), tag(" ")))))),
         ))(input)
     }
 
     fn parse_lhs<'a>(lsp_context: &mut LspContext<'a>, input: &'a str) -> Res<&'a str, &'a str> {
         let (assignment_symbol_rest, lhs) = preceded(multispace0, parse_identifer)(input)?;
+        let lhs = lhs.trim();
         lsp_context.add_definition(lhs);
         let (rest, _) = preceded(multispace0, alt((tag("="), tag("::="))))(assignment_symbol_rest)?;
         // let _loc = compute_location(input); // TODO: do somen with the location
@@ -171,6 +172,7 @@ pub mod ebnf {
     fn parse_non_terminal(input: &str) -> Res<&str, Expression> {
         let (input, symbol) =
             preceded(multispace0, terminated(parse_identifer, multispace0))(input)?;
+        let symbol = symbol.trim();
         let ref_loc = symbol.as_ptr() as usize;
         Ok((input, Expression::NonTerm(symbol.to_string(), ref_loc)))
     }

@@ -4,7 +4,7 @@ mod ebnf;
 mod lsp;
 
 fn main() {
-    let test = parse_ebnf("very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;");
+    let test = parse_ebnf("very nice stuff = hello;\nhello = \"world\";\ncool = hello;");
     match test {
         Ok((_, grammer)) => {
             println!("{:#?}", grammer);
