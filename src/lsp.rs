@@ -92,6 +92,8 @@ pub mod lsp {
             self.definitions
                 .insert(rule, self.location_at_offset(offset));
             self.symbols.insert(offset..offset + rule.len(), rule);
+            let loc = self.location_at_offset(offset);
+            self.references.entry(rule).or_insert(vec![]).push(loc);
             self.last_lhs = Some(rule)
         }
 
@@ -183,6 +185,18 @@ pub mod lsp {
                 lsp_context.definitions.get("World").unwrap(),
                 &Location { line: 0, col: 7 }
             );
+        }
+
+        #[test]
+        pub fn test_references() {
+            let ebnf = "some cool stuff = hello;\nslightly_cool_stuff = hello;\n   hello = 'a';";
+            let (_str, _grammar) = parse_ebnf(ebnf).expect("Ebnf is not parsable.");
+            let actual = _grammar
+                .lsp_context
+                .references("hello")
+                .expect("Should have references.");
+            let expected = &vec![Location { line: 0, col: 18 }, Location { line: 1, col: 22 }];
+            assert_eq!(actual, expected)
         }
 
         #[test]

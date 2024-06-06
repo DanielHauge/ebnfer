@@ -1,7 +1,6 @@
 pub mod ebnf {
-    use std::usize;
-
     use crate::lsp::lsp::LspContext;
+    use nom::Err as NomErr;
     use nom::{
         branch::alt,
         bytes::complete::{escaped, tag},
@@ -13,6 +12,7 @@ pub mod ebnf {
         Err, IResult, Offset,
     };
     use parse_hyperlinks::take_until_unbalanced;
+    use std::usize;
 
     #[derive(Debug)]
     pub struct Rule {
@@ -54,13 +54,77 @@ pub mod ebnf {
         pub lsp_context: LspContext<'a>,
     }
 
-    type Res<T, U> = IResult<T, U, VerboseError<T>>;
+    #[derive(Debug)]
+    struct EErrReason {
+        message: String,
+        offset: usize,
+    }
+
+    #[derive(Debug)]
+    struct EErrors {
+        errors: Vec<EErrReason>,
+    }
+
+    impl From<&(&str, VerboseErrorKind)> for EErrReason {
+        fn from(value: &(&str, VerboseErrorKind)) -> Self {
+            match value.1 {
+                VerboseErrorKind::Context(_) => todo!(),
+                VerboseErrorKind::Char(_) => todo!(),
+                VerboseErrorKind::Nom(_) => todo!(),
+            }
+        }
+    }
+
+    // Implement from nom err to EErr
+    impl From<Err<VerboseError<&str>>> for EErrors {
+        fn from(err: Err<VerboseError<&str>>) -> Self {
+            match err {
+                Err::Error(e) => EErrors {
+                    errors: e.errors.iter().map(|e| EErrReason::from(e)).collect(),
+                },
+                Err::Failure(e) => EErrors {
+                    errors: e.errors.iter().map(|e| EErrReason::from(e)).collect(),
+                },
+                Err::Incomplete(e) => EErrors {
+                    errors: match e {
+                        nom::Needed::Unknown => vec![{
+                            EErrReason {
+                                message: "Additional characters needed".to_string(),
+                                offset: usize::MAX,
+                            }
+                        }],
+                        nom::Needed::Size(s) => vec![{
+                            EErrReason {
+                                message: format!("{} additional characters needed", s),
+                                offset: usize::MAX,
+                            }
+                        }],
+                    },
+                },
+            }
+        }
+    }
+
+    impl Into<NomErr<EErrors>> for EErrors {
+        fn into(self) -> NomErr<EErrors> {
+            NomErr::Error(self)
+        }
+    }
+
+    // TODO: i need some way to convey what failed, for example: Could not parse identifier,
+    // because: error reasons: [reason1, reason2, ...]
+    // TOOD: need to wrap all errors to this struct
+    type Res<T, U> = IResult<T, U, EErrors>;
 
     fn parse_identifer(input: &str) -> Res<&str, &str> {
-        recognize(pair(
+        let identifier_parse: IResult<&str, &str, VerboseError<&str>> = recognize(pair(
             alt((alpha1, tag("_"))),
             many0_count(alt((alphanumeric1, alt((tag("_"), tag(" ")))))),
-        ))(input)
+        ))(input);
+        match identifier_parse {
+            Ok(parse_suc) => Ok(parse_suc),
+            Result::Err(e) => Err(EErrors::from(e).into()),
+        }
     }
 
     fn parse_lhs<'a>(lsp_context: &mut LspContext<'a>, input: &'a str) -> Res<&'a str, &'a str> {
@@ -68,7 +132,6 @@ pub mod ebnf {
         let lhs = lhs.trim();
         lsp_context.add_definition(lhs);
         let (rest, _) = preceded(multispace0, alt((tag("="), tag("::="))))(assignment_symbol_rest)?;
-        // let _loc = compute_location(input); // TODO: do somen with the location
         Ok((rest, lhs))
     }
 
@@ -290,19 +353,5 @@ pub mod ebnf {
 
         use super::super::super::lsp::lsp::Location;
         use super::parse_ebnf;
-
-        #[test]
-        pub fn test_ebnf_references() {
-            let ebnf = "some cool stuff = hello;\nslightly_cool_stuff = hello;\n   hello = 'a';";
-            let (_str, _grammar) = parse_ebnf(ebnf).expect("Ebnf is not parsable.");
-            let actual = _grammar
-                .lsp_context
-                .references("hello")
-                .expect("Should have references.");
-            let expected = &vec![Location { line: 0, col: 18 }, Location { line: 1, col: 22 }];
-            assert_eq!(actual, expected)
-
-            // _grammar.lsp_context
-        }
     }
 }
