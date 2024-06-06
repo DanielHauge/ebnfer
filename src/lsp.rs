@@ -12,18 +12,13 @@ pub mod lsp {
     }
 
     #[derive(Debug)]
-    pub struct Located<T> {
-        pub location: Location,
-        pub value: T,
-    }
-
-    #[derive(Debug)]
     pub struct LspContext<'a> {
         doc_content: &'a str,
         definitions: HashMap<&'a str, Location>,
         hover: HashMap<&'a str, &'a str>,
         references: HashMap<&'a str, Vec<Location>>,
-        new_lines_map: BTreeMap<usize, usize>, // Offset -> Line number
+        offset_to_line: BTreeMap<usize, usize>, // Offset -> Line number
+        line_to_offset: HashMap<usize, usize>,  // Line Number -> Offset
         symbols: RangeMap<usize, &'a str>,
         last_lhs: Option<&'a str>,
     }
@@ -31,19 +26,22 @@ pub mod lsp {
     impl<'a> LspContext<'a> {
         pub fn new(doc_content: &'a str) -> Self {
             let mut lines_offset_tree = BTreeMap::new();
+            let mut offset_lines = HashMap::new();
             doc_content
                 .lines()
                 .enumerate()
                 .map(|(i, l)| (i, doc_content.offset(l)))
                 .for_each(|(line_number, offset)| {
                     lines_offset_tree.insert(offset, line_number);
+                    offset_lines.insert(line_number, offset);
                 });
             Self {
                 doc_content,
                 definitions: HashMap::new(),
                 hover: HashMap::new(),
                 references: HashMap::new(),
-                new_lines_map: lines_offset_tree,
+                offset_to_line: lines_offset_tree,
+                line_to_offset: offset_lines,
                 symbols: RangeMap::new(),
                 last_lhs: None,
             }
@@ -53,9 +51,13 @@ pub mod lsp {
             ptr - self.doc_content.as_ptr() as usize
         }
 
+        pub fn references(&self, symbol: &'a str) -> Option<&Vec<Location>> {
+            self.references.get(symbol)
+        }
+
         pub fn location_at_offset(&self, offset: usize) -> Location {
             let line_offsets = self
-                .new_lines_map
+                .offset_to_line
                 .range((Included(0), Included(offset)))
                 .into_iter()
                 .rev()
@@ -70,6 +72,18 @@ pub mod lsp {
                     line: 0,
                     col: offset,
                 },
+            }
+        }
+
+        pub fn sylbol_from_location(&self, loc: Location) -> Option<&'a str> {
+            let line_offset = self.line_to_offset.get(&loc.line);
+
+            match line_offset {
+                Some(x) => match self.symbols.get(&(x + loc.col)) {
+                    Some(s) => Some(*s),
+                    None => None,
+                },
+                None => None,
             }
         }
 
@@ -90,14 +104,28 @@ pub mod lsp {
             }
         }
 
+        pub fn hover(&self, loc: Location) -> Option<&'a str> {
+            let symbol = self.sylbol_from_location(loc);
+            match symbol {
+                Some(s) => match self.hover.get(s) {
+                    Some(h) => Some(*h),
+                    None => None,
+                },
+                None => None,
+            }
+        }
+
         pub fn add_reference(&mut self, rule: &'a str, ptr_loc: usize) {
+            let offset = self.doc_content.offset(rule);
+
             let location = self.location_at_offset(ptr_loc);
+            self.symbols.insert(offset..offset + rule.len(), rule);
             self.references.entry(rule).or_insert(vec![]).push(location);
         }
     }
 
     mod tests {
-        use crate::lsp::lsp::Location;
+        use crate::{ebnf::ebnf::parse_ebnf, lsp::lsp::Location};
 
         #[test]
         fn test_new() {
@@ -106,6 +134,42 @@ pub mod lsp {
             assert_eq!(lsp_context.definitions.len(), 0);
             assert_eq!(lsp_context.hover.len(), 0);
             assert_eq!(lsp_context.references.len(), 0);
+        }
+
+        #[test]
+        fn test_find_symbol() {
+            let ebnf =
+                "some cool stuff = hello;\nslightly_cool_stuff = hello;\n   hello = 'a' | 'b';";
+            let (_, gram) = parse_ebnf(ebnf).expect("Should parse fine");
+            let lsp_context = gram.lsp_context;
+
+            for i in 0..14 {
+                let actual = lsp_context
+                    .sylbol_from_location(Location { line: 0, col: i })
+                    .expect("Symbol should be there");
+                assert_eq!(actual, "some cool stuff");
+            }
+            let actual = lsp_context
+                .sylbol_from_location(Location { line: 0, col: 19 })
+                .expect("To be there");
+            assert_eq!(actual, "hello");
+
+            let actual1 = lsp_context
+                .sylbol_from_location(Location { line: 1, col: 24 })
+                .expect("To be there");
+            assert_eq!(actual1, "hello");
+        }
+
+        #[test]
+        fn test_hover() {
+            let ebnf =
+                "some cool stuff = hello;\nslightly_cool_stuff = hello;\n   hello = 'a' | 'b';";
+            let (_, gram) = parse_ebnf(ebnf).expect("Should parse fine");
+            let lsp_context = gram.lsp_context;
+            let hello_hover = lsp_context
+                .hover(Location { line: 1, col: 24 })
+                .expect("Hello hover should be there");
+            assert_eq!(hello_hover, "'a' | 'b';")
         }
 
         #[test]

@@ -98,7 +98,10 @@ pub mod ebnf {
         lsp_context.complete_hover(rhs_str);
         let non_terminals = find_non_terminals(&rhs);
         for nt in non_terminals {
-            lsp_context.add_reference(rhs_str, lsp_context.offset_from_ptr(nt));
+            lsp_context.add_reference(
+                &rhs_str[..rhs_str.len() - 1],
+                lsp_context.offset_from_ptr(nt),
+            );
         }
         Ok((rest, rhs))
     }
@@ -281,5 +284,25 @@ pub mod ebnf {
             parse_context = rest;
         }
         Ok((ebnf, Grammar { rules, lsp_context }))
+    }
+
+    mod tests {
+
+        use super::super::super::lsp::lsp::Location;
+        use super::parse_ebnf;
+
+        #[test]
+        pub fn test_ebnf_references() {
+            let ebnf = "some cool stuff = hello;\nslightly_cool_stuff = hello;\n   hello = 'a';";
+            let (_str, _grammar) = parse_ebnf(ebnf).expect("Ebnf is not parsable.");
+            let actual = _grammar
+                .lsp_context
+                .references("hello")
+                .expect("Should have references.");
+            let expected = &vec![Location { line: 0, col: 18 }, Location { line: 1, col: 22 }];
+            assert_eq!(actual, expected)
+
+            // _grammar.lsp_context
+        }
     }
 }
