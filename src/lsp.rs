@@ -127,7 +127,6 @@ pub mod lsp {
     }
 
     mod tests {
-        use crate::{ebnf::ebnf::parse_ebnf, lsp::lsp::Location};
 
         #[test]
         fn test_new() {
@@ -142,22 +141,22 @@ pub mod lsp {
         fn test_find_symbol() {
             let ebnf =
                 "some cool stuff = hello;\nslightly_cool_stuff = hello;\n   hello = 'a' | 'b';";
-            let (_, gram) = parse_ebnf(ebnf).expect("Should parse fine");
+            let (_, gram) = crate::ebnf::ebnf::parse_ebnf(ebnf).expect("Should parse fine");
             let lsp_context = gram.lsp_context;
 
             for i in 0..14 {
                 let actual = lsp_context
-                    .sylbol_from_location(Location { line: 0, col: i })
+                    .sylbol_from_location(crate::lsp::lsp::Location { line: 0, col: i })
                     .expect("Symbol should be there");
                 assert_eq!(actual, "some cool stuff");
             }
             let actual = lsp_context
-                .sylbol_from_location(Location { line: 0, col: 19 })
+                .sylbol_from_location(crate::lsp::lsp::Location { line: 0, col: 19 })
                 .expect("To be there");
             assert_eq!(actual, "hello");
 
             let actual1 = lsp_context
-                .sylbol_from_location(Location { line: 1, col: 24 })
+                .sylbol_from_location(crate::lsp::lsp::Location { line: 1, col: 24 })
                 .expect("To be there");
             assert_eq!(actual1, "hello");
         }
@@ -166,10 +165,10 @@ pub mod lsp {
         fn test_hover() {
             let ebnf =
                 "some cool stuff = hello;\nslightly_cool_stuff = hello;\n   hello = 'a' | 'b';";
-            let (_, gram) = parse_ebnf(ebnf).expect("Should parse fine");
+            let (_, gram) = crate::ebnf::ebnf::parse_ebnf(ebnf).expect("Should parse fine");
             let lsp_context = gram.lsp_context;
             let hello_hover = lsp_context
-                .hover(Location { line: 1, col: 24 })
+                .hover(crate::lsp::lsp::Location { line: 1, col: 24 })
                 .expect("Hello hover should be there");
             assert_eq!(hello_hover, "'a' | 'b';")
         }
@@ -183,22 +182,23 @@ pub mod lsp {
             assert_eq!(lsp_context.definitions.len(), 1);
             assert_eq!(
                 lsp_context.definitions.get("World").unwrap(),
-                &Location { line: 0, col: 7 }
+                &crate::lsp::lsp::Location { line: 0, col: 7 }
             );
         }
 
         #[test]
         pub fn test_references() {
             let ebnf = "some cool stuff = hello;\nslightly_cool_stuff = hello;\n   hello = 'a';";
-            let (_str, _grammar) = parse_ebnf(ebnf).expect("Ebnf is not parsable.");
+            let (_str, _grammar) =
+                crate::ebnf::ebnf::parse_ebnf(ebnf).expect("Ebnf is not parsable.");
             let actual = _grammar
                 .lsp_context
                 .references("hello")
                 .expect("Should have references.");
             let expected = &vec![
-                Location { line: 0, col: 18 },
-                Location { line: 1, col: 22 },
-                Location { line: 2, col: 3 },
+                crate::lsp::lsp::Location { line: 0, col: 18 },
+                crate::lsp::lsp::Location { line: 1, col: 22 },
+                crate::lsp::lsp::Location { line: 2, col: 3 },
             ];
             assert_eq!(actual, expected)
         }
@@ -212,7 +212,10 @@ pub mod lsp {
             lsp_context.add_reference(world_identifier, 31);
             assert_eq!(
                 lsp_context.references.get(world_identifier).unwrap(),
-                &vec![Location { line: 0, col: 7 }, Location { line: 0, col: 31 }]
+                &vec![
+                    crate::lsp::lsp::Location { line: 0, col: 7 },
+                    crate::lsp::lsp::Location { line: 0, col: 31 }
+                ]
             );
         }
 
@@ -224,7 +227,7 @@ pub mod lsp {
             lsp_context.add_definition(greetings_identifier);
             assert_eq!(
                 lsp_context.definitions.get(greetings_identifier).unwrap(),
-                &Location { line: 1, col: 1 }
+                &crate::lsp::lsp::Location { line: 1, col: 1 }
             );
         }
 
