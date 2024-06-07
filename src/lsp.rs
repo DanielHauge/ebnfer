@@ -195,7 +195,11 @@ pub mod lsp {
                 .lsp_context
                 .references("hello")
                 .expect("Should have references.");
-            let expected = &vec![Location { line: 0, col: 18 }, Location { line: 1, col: 22 }];
+            let expected = &vec![
+                Location { line: 0, col: 18 },
+                Location { line: 1, col: 22 },
+                Location { line: 2, col: 3 },
+            ];
             assert_eq!(actual, expected)
         }
 
