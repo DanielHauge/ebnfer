@@ -2,6 +2,7 @@ pub mod lsp {
     use std::collections::{BTreeMap, HashMap};
     use std::ops::Bound::Included;
 
+    use nom::error::VerboseError;
     use nom::Offset;
     use rangemap::RangeMap;
 
@@ -21,6 +22,11 @@ pub mod lsp {
         line_to_offset: HashMap<usize, usize>,  // Line Number -> Offset
         symbols: RangeMap<usize, &'a str>,
         last_lhs: Option<&'a str>,
+    }
+
+    pub struct LspError {
+        message: String,
+        location: Location,
     }
 
     impl<'a> LspContext<'a> {

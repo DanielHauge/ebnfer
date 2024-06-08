@@ -1,16 +1,15 @@
 pub mod ebnf {
     use crate::lsp::lsp::LspContext;
-    
-    
+
     use nom::{
         branch::alt,
         bytes::complete::{escaped, tag},
         character::complete::{alpha1, alphanumeric1, char, multispace0, none_of, one_of},
         combinator::recognize,
-        error::{VerboseError, VerboseErrorKind},
+        error::{ParseError, VerboseError, VerboseErrorKind},
         multi::{many0_count, many1},
         sequence::{delimited, pair, preceded, terminated},
-        Err, IResult, Offset,
+        Err, IResult, Into, Offset,
     };
     use parse_hyperlinks::take_until_unbalanced;
     use std::usize;
@@ -55,24 +54,154 @@ pub mod ebnf {
         pub lsp_context: LspContext<'a>,
     }
 
-    // TODO: i need some way to convey what failed, for example: Could not parse identifier,
-    // because: error reasons: [reason1, reason2, ...]
-    // TOOD: need to wrap all errors to this struct
-    type Res<T, U> = IResult<T, U, VerboseError<T>>;
-
-    fn parse_identifer(input: &str) -> Res<&str, &str> {
-        let identifier_parse: IResult<&str, &str, VerboseError<&str>> = recognize(pair(
-            alt((alpha1, tag("_"))),
-            many0_count(alt((alphanumeric1, alt((tag("_"), tag(" ")))))),
-        ))(input);
-        identifier_parse
+    // Parsing Error, unexpected symbol found: '-'
+    // Context: LHS -> Identifer:
+    //    A correct identifer is expected to start with an alphabet or an underscore, and only contain alphanumeric characters, whitespacers and underscores.
+    //
+    // Errors:
+    //  - 1. ["-\nhell....", TAG]
+    //  - 2. [";\ncool = hello;", TAG]
+    #[derive(Debug)]
+    pub struct EErr<T> {
+        input: T,
+        parsing_context: Vec<EbnfParseContext>,
+        error_message: String,
+        parser_errors: Vec<VerboseErrorKind>,
     }
 
-    fn parse_lhs<'a>(lsp_context: &mut LspContext<'a>, input: &'a str) -> Res<&'a str, &'a str> {
+    trait ParseContextualError {
+        fn with_context(self, context: EbnfParseContext) -> Self;
+    }
+
+    impl<T> ParseContextualError for EErr<T> {
+        fn with_context(self, context: EbnfParseContext) -> EErr<T> {
+            let new_error_message = format!(
+                "Could not parse {:?}, because: {}",
+                context, self.error_message
+            );
+            let mut new_parsing_context = self.parsing_context;
+            new_parsing_context.push(context);
+            EErr {
+                input: self.input,
+                parsing_context: new_parsing_context,
+                error_message: new_error_message,
+                parser_errors: self.parser_errors,
+            }
+        }
+    }
+
+    impl<T, U> ParseContextualError for ERes<T, U> {
+        fn with_context(self, context: EbnfParseContext) -> ERes<T, U> {
+            match self {
+                Result::Err(e) => Result::Err(e.with_context(context)),
+                a => a,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum EbnfParseContext {
+        Identifier,
+        Lhs,
+    }
+
+    impl<T> ParseContextualError for nom::Err<T>
+    where
+        T: ParseContextualError,
+    {
+        fn with_context(self, context: EbnfParseContext) -> Self {
+            match self {
+                Err::Error(e) => Err::Error(e.with_context(context)),
+                Err::Failure(f) => Err::Failure(f.with_context(context)),
+                a => a,
+            }
+        }
+    }
+
+    impl<T> ParseError<T> for EErr<T>
+    where
+        T: Offset,
+    {
+        fn from_error_kind(input: T, kind: nom::error::ErrorKind) -> Self {
+            match kind {
+                nom::error::ErrorKind::Tag => todo!(),
+                nom::error::ErrorKind::MapRes => todo!(),
+                nom::error::ErrorKind::MapOpt => todo!(),
+                nom::error::ErrorKind::Alt => todo!(),
+                nom::error::ErrorKind::IsNot => todo!(),
+                nom::error::ErrorKind::IsA => todo!(),
+                nom::error::ErrorKind::SeparatedList => todo!(),
+                nom::error::ErrorKind::SeparatedNonEmptyList => todo!(),
+                nom::error::ErrorKind::Many0 => todo!(),
+                nom::error::ErrorKind::Many1 => todo!(),
+                nom::error::ErrorKind::ManyTill => todo!(),
+                nom::error::ErrorKind::Count => todo!(),
+                nom::error::ErrorKind::TakeUntil => todo!(),
+                nom::error::ErrorKind::LengthValue => todo!(),
+                nom::error::ErrorKind::TagClosure => todo!(),
+                nom::error::ErrorKind::Alpha => todo!(),
+                nom::error::ErrorKind::Digit => todo!(),
+                nom::error::ErrorKind::HexDigit => todo!(),
+                nom::error::ErrorKind::OctDigit => todo!(),
+                nom::error::ErrorKind::AlphaNumeric => todo!(),
+                nom::error::ErrorKind::Space => todo!(),
+                nom::error::ErrorKind::MultiSpace => todo!(),
+                nom::error::ErrorKind::LengthValueFn => todo!(),
+                nom::error::ErrorKind::Eof => todo!(),
+                nom::error::ErrorKind::Switch => todo!(),
+                nom::error::ErrorKind::TagBits => todo!(),
+                nom::error::ErrorKind::OneOf => todo!(),
+                nom::error::ErrorKind::NoneOf => todo!(),
+                nom::error::ErrorKind::Char => todo!(),
+                nom::error::ErrorKind::CrLf => todo!(),
+                nom::error::ErrorKind::RegexpMatch => todo!(),
+                nom::error::ErrorKind::RegexpMatches => todo!(),
+                nom::error::ErrorKind::RegexpFind => todo!(),
+                nom::error::ErrorKind::RegexpCapture => todo!(),
+                nom::error::ErrorKind::RegexpCaptures => todo!(),
+                nom::error::ErrorKind::TakeWhile1 => todo!(),
+                nom::error::ErrorKind::Complete => todo!(),
+                nom::error::ErrorKind::Fix => todo!(),
+                nom::error::ErrorKind::Escaped => todo!(),
+                nom::error::ErrorKind::EscapedTransform => todo!(),
+                nom::error::ErrorKind::NonEmpty => todo!(),
+                nom::error::ErrorKind::ManyMN => todo!(),
+                nom::error::ErrorKind::Not => todo!(),
+                nom::error::ErrorKind::Permutation => todo!(),
+                nom::error::ErrorKind::Verify => todo!(),
+                nom::error::ErrorKind::TakeTill1 => todo!(),
+                nom::error::ErrorKind::TakeWhileMN => todo!(),
+                nom::error::ErrorKind::TooLarge => todo!(),
+                nom::error::ErrorKind::Many0Count => todo!(),
+                nom::error::ErrorKind::Many1Count => todo!(),
+                nom::error::ErrorKind::Float => todo!(),
+                nom::error::ErrorKind::Satisfy => todo!(),
+                nom::error::ErrorKind::Fail => todo!(),
+            }
+        }
+
+        fn append(input: T, kind: nom::error::ErrorKind, other: Self) -> Self {
+            todo!()
+        }
+    }
+
+    pub type Res<T, U> = IResult<T, U, VerboseError<T>>;
+    pub type ERes<T, U> = IResult<T, U, EErr<T>>; // Extended IResult, with optional context
+
+    fn parse_identifer(input: &str) -> ERes<&str, &str> {
+        recognize(pair(
+            alt((alpha1, tag("_"))),
+            many0_count(alt((alphanumeric1, alt((tag("_"), tag(" ")))))),
+        ))(input)
+        .with_context(EbnfParseContext::Identifier)
+    }
+
+    fn parse_lhs<'a>(lsp_context: &mut LspContext<'a>, input: &'a str) -> ERes<&'a str, &'a str> {
         let (assignment_symbol_rest, lhs) = preceded(multispace0, parse_identifer)(input)?;
         let lhs = lhs.trim();
         lsp_context.add_definition(lhs);
-        let (rest, _) = preceded(multispace0, alt((tag("="), tag("::="))))(assignment_symbol_rest)?;
+        let (rest, _) = preceded(multispace0, alt((tag("="), tag("::="))))(assignment_symbol_rest)
+            .with_context(EbnfParseContext::Lhs)?;
 
         Ok((rest, lhs))
     }
@@ -93,12 +222,13 @@ pub mod ebnf {
         }
     }
 
-    fn parse_rhs<'a>(lsp_context: &mut LspContext<'a>, input: &'a str) -> Res<&'a str, Expression> {
-        // Make closure to parse multiple expressions passing in the lsp_context
+    fn parse_rhs<'a>(
+        lsp_context: &mut LspContext<'a>,
+        input: &'a str,
+    ) -> ERes<&'a str, Expression> {
         let (input, _) = multispace0(input)?;
         let start_rhs = input;
         let (rest, rhs) = terminated(parse_multiple, preceded(multispace0, char(';')))(input)?;
-        // Recursively go through the rhs and find all NonTerminals
         let rhs_str = &start_rhs[..start_rhs.offset(rest)];
         lsp_context.complete_hover(rhs_str);
         let non_terminals = find_non_terminals(&rhs);
@@ -111,7 +241,7 @@ pub mod ebnf {
         Ok((rest, rhs))
     }
 
-    fn parse_expression(input: &str) -> Res<&str, Expression> {
+    fn parse_expression(input: &str) -> ERes<&str, Expression> {
         let (mut input, mut left_node) = preceded(
             multispace0,
             alt((
@@ -124,7 +254,7 @@ pub mod ebnf {
             )),
         )(input)?;
 
-        let optional_regex_ext: Res<&str, RegexExtKind> = parse_regex_ext(input);
+        let optional_regex_ext: ERes<&str, RegexExtKind> = parse_regex_ext(input);
 
         match optional_regex_ext {
             Ok((s, regex_ext_kind)) => {
@@ -133,7 +263,7 @@ pub mod ebnf {
             }
             Err(_) => {}
         }
-        let optional_symbol: Res<&str, (SymbolKind, Expression)> = parse_symbol(input);
+        let optional_symbol: ERes<&str, (SymbolKind, Expression)> = parse_symbol(input);
 
         match optional_symbol {
             Ok((input, (symbol, right_node))) => Ok((
@@ -144,7 +274,7 @@ pub mod ebnf {
         }
     }
 
-    fn parse_terminal(input: &str) -> Res<&str, Expression> {
+    fn parse_terminal(input: &str) -> ERes<&str, Expression> {
         let (input, string) = alt((
             delimited(
                 char('\''),
@@ -160,7 +290,7 @@ pub mod ebnf {
         Ok((input, Expression::Term(string.to_string())))
     }
 
-    fn parse_regex_string(input: &str) -> Res<&str, Expression> {
+    fn parse_regex_string(input: &str) -> ERes<&str, Expression> {
         let (input, string) = alt((
             delimited(
                 tag("#'"),
@@ -177,7 +307,7 @@ pub mod ebnf {
         Ok((input, Expression::Regex(string.to_string())))
     }
 
-    fn parse_non_terminal(input: &str) -> Res<&str, Expression> {
+    fn parse_non_terminal(input: &str) -> ERes<&str, Expression> {
         let (input, symbol) =
             preceded(multispace0, terminated(parse_identifer, multispace0))(input)?;
         let symbol = symbol.trim();
@@ -185,7 +315,7 @@ pub mod ebnf {
         Ok((input, Expression::NonTerm(symbol.to_string(), ref_loc)))
     }
 
-    fn parse_regex_ext(input: &str) -> Res<&str, RegexExtKind> {
+    fn parse_regex_ext(input: &str) -> ERes<&str, RegexExtKind> {
         let (input, regex_ext) =
             preceded(multispace0, alt((char('*'), char('+'), char('?'))))(input)?;
 
@@ -199,20 +329,20 @@ pub mod ebnf {
         Ok((input, regex_kind))
     }
 
-    fn parse_symbol(input: &str) -> Res<&str, (SymbolKind, Expression)> {
+    fn parse_symbol(input: &str) -> ERes<&str, (SymbolKind, Expression)> {
         let (input, symbol_pair) =
             preceded(multispace0, alt((parse_concatenation, parse_alternation)))(input)?;
 
         Ok((input, symbol_pair))
     }
 
-    fn parse_concatenation(input: &str) -> Res<&str, (SymbolKind, Expression)> {
+    fn parse_concatenation(input: &str) -> ERes<&str, (SymbolKind, Expression)> {
         let (input, node) = preceded(char(','), parse_multiple)(input)?;
 
         Ok((input, (SymbolKind::Concatenation, node)))
     }
 
-    fn parse_alternation(input: &str) -> Res<&str, (SymbolKind, Expression)> {
+    fn parse_alternation(input: &str) -> ERes<&str, (SymbolKind, Expression)> {
         let (input, node) = preceded(char('|'), parse_multiple)(input)?;
 
         Ok((input, (SymbolKind::Alternation, node)))
@@ -222,7 +352,7 @@ pub mod ebnf {
         input: &str,
         opening_bracket: char,
         closing_bracket: char,
-    ) -> Res<&str, &str> {
+    ) -> ERes<&str, &str> {
         let result = delimited(
             tag(opening_bracket.to_string().as_str()),
             take_until_unbalanced(opening_bracket, closing_bracket),
@@ -231,16 +361,16 @@ pub mod ebnf {
 
         match result {
             Ok((input, inner)) => Ok((input, inner)),
-            Err(_) => Err(Err::Error(VerboseError {
-                errors: vec![(
-                    input,
-                    VerboseErrorKind::Context("Incomplete delimited node"),
-                )],
+            Err(e) => Err(Err::Error(EErr {
+                parsing_context: todo!(),
+                error_message: todo!(),
+                input,
+                parser_errors: todo!(),
             })),
         }
     }
 
-    fn parse_group(input: &str) -> Res<&str, Expression> {
+    fn parse_group(input: &str) -> ERes<&str, Expression> {
         let (input, inner) = parse_delimited_node(input, '(', ')')?;
 
         let (_, node) = preceded(multispace0, parse_multiple)(inner)?;
@@ -248,7 +378,7 @@ pub mod ebnf {
         Ok((input, Expression::Group(Box::new(node))))
     }
 
-    fn parse_optional(input: &str) -> Res<&str, Expression> {
+    fn parse_optional(input: &str) -> ERes<&str, Expression> {
         let (input, inner) = parse_delimited_node(input, '[', ']')?;
 
         let (_, node) = preceded(multispace0, parse_multiple)(inner)?;
@@ -256,7 +386,7 @@ pub mod ebnf {
         Ok((input, Expression::Optional(Box::new(node))))
     }
 
-    fn parse_repeat(input: &str) -> Res<&str, Expression> {
+    fn parse_repeat(input: &str) -> ERes<&str, Expression> {
         let (input, inner) = parse_delimited_node(input, '{', '}')?;
         let parse_multi_lsp_context_applied = move |input| parse_multiple(input);
 
@@ -265,7 +395,7 @@ pub mod ebnf {
         Ok((input, Expression::Repeated(Box::new(node))))
     }
 
-    fn parse_multiple(input: &str) -> Res<&str, Expression> {
+    fn parse_multiple(input: &str) -> ERes<&str, Expression> {
         let (input, node) = preceded(multispace0, many1(parse_expression))(input)?;
 
         match node {
@@ -274,7 +404,7 @@ pub mod ebnf {
         }
     }
 
-    pub fn parse_ebnf(ebnf: &str) -> Res<&str, Grammar> {
+    pub fn parse_ebnf(ebnf: &str) -> ERes<&str, Grammar> {
         let mut parse_context = ebnf;
         let mut rules: Vec<Rule> = Vec::new();
         let mut lsp_context = LspContext::new(ebnf);
@@ -291,9 +421,5 @@ pub mod ebnf {
         Ok((ebnf, Grammar { rules, lsp_context }))
     }
 
-    mod tests {
-
-        
-        
-    }
+    mod tests {}
 }
