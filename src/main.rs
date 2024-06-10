@@ -1,6 +1,7 @@
 use crate::ebnf::ebnf::parse_ebnf;
 
 mod ebnf;
+mod ipc;
 mod lsp;
 
 fn main() {
