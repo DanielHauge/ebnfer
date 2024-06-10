@@ -9,7 +9,7 @@ pub mod ebnf {
         error::{ErrorKind, ParseError, VerboseError, VerboseErrorKind},
         multi::{many0_count, many1},
         sequence::{delimited, pair, preceded, terminated},
-        Err, IResult, Into, Offset,
+        Err, IResult, Offset,
     };
     use parse_hyperlinks::take_until_unbalanced;
     use std::usize;
@@ -64,9 +64,10 @@ pub mod ebnf {
     #[derive(Debug)]
     pub struct EErr<T> {
         input: T,
-        parsing_context: Vec<EbnfParseContext>,
         error_message: String,
+        current_parsing_context: Vec<EbnfParseContext>,
         parser_errors: Vec<ErrorKind>,
+        parser_errors_contexts: Vec<Vec<EbnfParseContext>>,
     }
 
     trait ParseContextualError {
@@ -75,17 +76,14 @@ pub mod ebnf {
 
     impl<T> ParseContextualError for EErr<T> {
         fn with_context(self, context: EbnfParseContext) -> EErr<T> {
-            let new_error_message = format!(
-                "Could not parse {:?}, because: {}",
-                context, self.error_message
-            );
-            let mut new_parsing_context = self.parsing_context;
+            let mut new_parsing_context = self.current_parsing_context;
             new_parsing_context.push(context);
             EErr {
                 input: self.input,
-                parsing_context: new_parsing_context,
-                error_message: new_error_message,
+                error_message: self.error_message, //TODO fix:
+                current_parsing_context: new_parsing_context,
                 parser_errors: self.parser_errors,
+                parser_errors_contexts: self.parser_errors_contexts,
             }
         }
     }
@@ -99,7 +97,7 @@ pub mod ebnf {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub enum EbnfParseContext {
         Identifier,
         Lhs,
@@ -126,20 +124,24 @@ pub mod ebnf {
         fn from_error_kind(input: T, kind: nom::error::ErrorKind) -> Self {
             EErr {
                 input,
-                parsing_context: vec![],
                 error_message: format!("Error occured while using parser: {:?}", kind),
                 parser_errors: vec![kind],
+                parser_errors_contexts: Vec::new(),
+                current_parsing_context: Vec::new(),
             }
         }
 
         fn append(input: T, kind: nom::error::ErrorKind, other: Self) -> Self {
             let mut new_parser_errors = other.parser_errors;
             new_parser_errors.push(kind);
-            EErr {
+            let mut new_parser_errors_contexts = other.parser_errors_contexts;
+            new_parser_errors_contexts.push(other.current_parsing_context.clone());
+            Self {
                 input,
-                parsing_context: other.parsing_context,
                 error_message: format!("Error occured while using parser: {:?}", kind),
+                current_parsing_context: other.current_parsing_context,
                 parser_errors: new_parser_errors,
+                parser_errors_contexts: new_parser_errors_contexts,
             }
         }
     }
@@ -333,7 +335,8 @@ pub mod ebnf {
                     Err::Failure(f) => f.input.to_string(),
                 };
                 Err(Err::Error(EErr {
-                    parsing_context: vec![],
+                    current_parsing_context: vec![],
+                    parser_errors_contexts: vec![],
                     error_message: message,
                     input,
                     parser_errors: vec![],
