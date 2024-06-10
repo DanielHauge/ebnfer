@@ -6,7 +6,7 @@ pub mod ebnf {
         bytes::complete::{escaped, tag},
         character::complete::{alpha1, alphanumeric1, char, multispace0, none_of, one_of},
         combinator::recognize,
-        error::{ParseError, VerboseError, VerboseErrorKind},
+        error::{ErrorKind, ParseError, VerboseError, VerboseErrorKind},
         multi::{many0_count, many1},
         sequence::{delimited, pair, preceded, terminated},
         Err, IResult, Into, Offset,
@@ -66,7 +66,7 @@ pub mod ebnf {
         input: T,
         parsing_context: Vec<EbnfParseContext>,
         error_message: String,
-        parser_errors: Vec<VerboseErrorKind>,
+        parser_errors: Vec<ErrorKind>,
     }
 
     trait ParseContextualError {
@@ -103,6 +103,7 @@ pub mod ebnf {
     pub enum EbnfParseContext {
         Identifier,
         Lhs,
+        Rhs,
     }
 
     impl<T> ParseContextualError for nom::Err<T>
@@ -123,65 +124,23 @@ pub mod ebnf {
         T: Offset,
     {
         fn from_error_kind(input: T, kind: nom::error::ErrorKind) -> Self {
-            match kind {
-                nom::error::ErrorKind::Tag => todo!(),
-                nom::error::ErrorKind::MapRes => todo!(),
-                nom::error::ErrorKind::MapOpt => todo!(),
-                nom::error::ErrorKind::Alt => todo!(),
-                nom::error::ErrorKind::IsNot => todo!(),
-                nom::error::ErrorKind::IsA => todo!(),
-                nom::error::ErrorKind::SeparatedList => todo!(),
-                nom::error::ErrorKind::SeparatedNonEmptyList => todo!(),
-                nom::error::ErrorKind::Many0 => todo!(),
-                nom::error::ErrorKind::Many1 => todo!(),
-                nom::error::ErrorKind::ManyTill => todo!(),
-                nom::error::ErrorKind::Count => todo!(),
-                nom::error::ErrorKind::TakeUntil => todo!(),
-                nom::error::ErrorKind::LengthValue => todo!(),
-                nom::error::ErrorKind::TagClosure => todo!(),
-                nom::error::ErrorKind::Alpha => todo!(),
-                nom::error::ErrorKind::Digit => todo!(),
-                nom::error::ErrorKind::HexDigit => todo!(),
-                nom::error::ErrorKind::OctDigit => todo!(),
-                nom::error::ErrorKind::AlphaNumeric => todo!(),
-                nom::error::ErrorKind::Space => todo!(),
-                nom::error::ErrorKind::MultiSpace => todo!(),
-                nom::error::ErrorKind::LengthValueFn => todo!(),
-                nom::error::ErrorKind::Eof => todo!(),
-                nom::error::ErrorKind::Switch => todo!(),
-                nom::error::ErrorKind::TagBits => todo!(),
-                nom::error::ErrorKind::OneOf => todo!(),
-                nom::error::ErrorKind::NoneOf => todo!(),
-                nom::error::ErrorKind::Char => todo!(),
-                nom::error::ErrorKind::CrLf => todo!(),
-                nom::error::ErrorKind::RegexpMatch => todo!(),
-                nom::error::ErrorKind::RegexpMatches => todo!(),
-                nom::error::ErrorKind::RegexpFind => todo!(),
-                nom::error::ErrorKind::RegexpCapture => todo!(),
-                nom::error::ErrorKind::RegexpCaptures => todo!(),
-                nom::error::ErrorKind::TakeWhile1 => todo!(),
-                nom::error::ErrorKind::Complete => todo!(),
-                nom::error::ErrorKind::Fix => todo!(),
-                nom::error::ErrorKind::Escaped => todo!(),
-                nom::error::ErrorKind::EscapedTransform => todo!(),
-                nom::error::ErrorKind::NonEmpty => todo!(),
-                nom::error::ErrorKind::ManyMN => todo!(),
-                nom::error::ErrorKind::Not => todo!(),
-                nom::error::ErrorKind::Permutation => todo!(),
-                nom::error::ErrorKind::Verify => todo!(),
-                nom::error::ErrorKind::TakeTill1 => todo!(),
-                nom::error::ErrorKind::TakeWhileMN => todo!(),
-                nom::error::ErrorKind::TooLarge => todo!(),
-                nom::error::ErrorKind::Many0Count => todo!(),
-                nom::error::ErrorKind::Many1Count => todo!(),
-                nom::error::ErrorKind::Float => todo!(),
-                nom::error::ErrorKind::Satisfy => todo!(),
-                nom::error::ErrorKind::Fail => todo!(),
+            EErr {
+                input,
+                parsing_context: vec![],
+                error_message: format!("Error occured while using parser: {:?}", kind),
+                parser_errors: vec![kind],
             }
         }
 
         fn append(input: T, kind: nom::error::ErrorKind, other: Self) -> Self {
-            todo!()
+            let mut new_parser_errors = other.parser_errors;
+            new_parser_errors.push(kind);
+            EErr {
+                input,
+                parsing_context: other.parsing_context,
+                error_message: format!("Error occured while using parser: {:?}", kind),
+                parser_errors: new_parser_errors,
+            }
         }
     }
 
@@ -228,7 +187,8 @@ pub mod ebnf {
     ) -> ERes<&'a str, Expression> {
         let (input, _) = multispace0(input)?;
         let start_rhs = input;
-        let (rest, rhs) = terminated(parse_multiple, preceded(multispace0, char(';')))(input)?;
+        let (rest, rhs) = terminated(parse_multiple, preceded(multispace0, char(';')))(input)
+            .with_context(EbnfParseContext::Rhs)?;
         let rhs_str = &start_rhs[..start_rhs.offset(rest)];
         lsp_context.complete_hover(rhs_str);
         let non_terminals = find_non_terminals(&rhs);
@@ -361,12 +321,24 @@ pub mod ebnf {
 
         match result {
             Ok((input, inner)) => Ok((input, inner)),
-            Err(e) => Err(Err::Error(EErr {
-                parsing_context: todo!(),
-                error_message: todo!(),
-                input,
-                parser_errors: todo!(),
-            })),
+            Err(e) => {
+                let message = match e {
+                    Err::Incomplete(i) => match i {
+                        nom::Needed::Unknown => format!("Incomplete parsing, unknown size"),
+                        nom::Needed::Size(s) => {
+                            format!("Incomplete parsing, require additinal {} symbols", s)
+                        }
+                    },
+                    Err::Error(e) => e.input.to_string(),
+                    Err::Failure(f) => f.input.to_string(),
+                };
+                Err(Err::Error(EErr {
+                    parsing_context: vec![],
+                    error_message: message,
+                    input,
+                    parser_errors: vec![],
+                }))
+            }
         }
     }
 
