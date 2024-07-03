@@ -32,6 +32,8 @@ dependencies = [
  "nom",
  "parse-hyperlinks",
  "rangemap",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
