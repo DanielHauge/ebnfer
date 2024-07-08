@@ -2,16 +2,29 @@ pub mod ipc {
 
     #![allow(clippy::print_stderr)]
 
+    use std::collections::HashMap;
     use std::error::Error;
+    use std::panic;
+    use std::rc::Rc;
 
+    use lsp_types::notification::{
+        self, DidOpenNotebookDocument, DidOpenTextDocument, Notification,
+    };
+    use lsp_types::request::HoverRequest;
     use lsp_types::{
         request::GotoDefinition, DiagnosticOptions, DiagnosticServerCapabilities,
         GotoDefinitionResponse, InitializeParams, ServerCapabilities,
     };
-    use lsp_types::{HoverProviderCapability, OneOf};
+    use lsp_types::{
+        DidOpenTextDocumentParams, Hover, HoverProviderCapability, OneOf,
+        TextDocumentSyncCapability, TextDocumentSyncKind,
+    };
 
     use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
     use serde_json::Value;
+
+    use crate::ebnf::ebnf::parse_ebnf;
+    use crate::lsp::lsp::LspContext;
     // https://github.com/rust-lang/rust-analyzer/blob/master/lib/lsp-server/examples/goto_def.rs
 
     pub fn start() -> Result<(), Box<dyn Error>> {
@@ -26,10 +39,20 @@ pub mod ipc {
             //     workspace_diagnostics: false,
             //     inter_file_dependencies: false,
             // })),
+            text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
             definition_provider: Some(OneOf::Left(true)),
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             references_provider: Some(OneOf::Left(true)),
             rename_provider: Some(OneOf::Left(true)),
+            completion_provider: None,
+            diagnostic_provider: None,
+            declaration_provider: None,
+            implementation_provider: None,
+            type_definition_provider: None,
+            document_highlight_provider: None,
+            document_formatting_provider: None,
+            document_range_formatting_provider: None,
+            document_on_type_formatting_provider: None,
             ..Default::default()
         })
         .unwrap();
@@ -66,10 +89,8 @@ pub mod ipc {
         params: Value,
     ) -> Result<(), Box<dyn Error + Sync + Send>> {
         let _params: InitializeParams = serde_json::from_value(params).unwrap();
-        log_file(&format!("{_params:?}"));
+        let mut docs: HashMap<String, String> = HashMap::new();
         for msg in &connection.receiver {
-            eprintln!("got msg: {msg:?}");
-            log_file(&format!("{msg:?}"));
             match msg {
                 Message::Request(req) => {
                     if connection.handle_shutdown(&req)? {
@@ -77,25 +98,45 @@ pub mod ipc {
                     }
                     log_file(&format!("{req:?}"));
 
-                    eprintln!("got request: {req:?}");
-                    // match cast::<GotoDefinition>(req) {
-                    //     Ok((id, params)) => {
-                    //         eprintln!("got gotoDefinition request #{id}: {params:?}");
-                    //
-                    //         let result = Some(GotoDefinitionResponse::Array(Vec::new()));
-                    //         let result = serde_json::to_value(&result).unwrap();
-                    //         let resp = Response {
-                    //             id,
-                    //             result: Some(result),
-                    //             error: None,
-                    //         };
-                    //         connection.sender.send(Message::Response(resp))?;
-                    //         continue;
-                    //     }
-                    //     Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
-                    //     Err(ExtractError::MethodMismatch(req)) => req,
-                    // };
-                    // ...
+                    match cast_req::<HoverRequest>(req) {
+                        Ok((id, hov_req)) => {
+                            let doc = docs
+                                .get(
+                                    &hov_req
+                                        .text_document_position_params
+                                        .text_document
+                                        .uri
+                                        .to_string(),
+                                )
+                                .unwrap();
+                            let lsp_ctx = parse_ebnf(doc)
+                                .unwrap()
+                                .1
+                                .lsp_context
+                                .hover(crate::lsp::lsp::Location {
+                                    line: hov_req.text_document_position_params.position.line
+                                        as usize,
+                                    col: hov_req.text_document_position_params.position.character
+                                        as usize,
+                                })
+                                .unwrap();
+                            let result = Some(Hover {
+                                range: None,
+                                contents: lsp_types::HoverContents::Scalar(
+                                    lsp_types::MarkedString::String(lsp_ctx.to_string()),
+                                ),
+                            });
+                            let json_result = serde_json::to_value(result).unwrap();
+                            let resp = Response {
+                                id,
+                                result: Some(json_result),
+                                error: None,
+                            };
+
+                            connection.sender.send(Message::Response(resp)).unwrap();
+                        }
+                        Err(_) => todo!(),
+                    }
                 }
                 Message::Response(resp) => {
                     log_file(&format!("{resp:?}"));
@@ -105,14 +146,33 @@ pub mod ipc {
                 Message::Notification(not) => {
                     log_file(&format!("{not:?}"));
 
-                    eprintln!("got notification: {not:?}");
+                    match not.method.as_str() {
+                        notification::DidOpenTextDocument::METHOD => {
+                            let params: DidOpenTextDocumentParams =
+                                not.extract(DidOpenTextDocument::METHOD).unwrap();
+                            log_file(&format!("{params:?}"));
+                            docs.insert(
+                                params.text_document.uri.to_string(),
+                                params.text_document.text.to_string(),
+                            );
+                        }
+                        notification::DidChangeTextDocument::METHOD => {
+                            let params: lsp_types::DidChangeTextDocumentParams = not
+                                .extract(lsp_types::notification::DidChangeTextDocument::METHOD)
+                                .unwrap();
+                            log_file(&format!("{params:?}"));
+                        }
+                        _ => {}
+                    }
+
+                    // eprintln!("got notification: {not:?}");
                 }
             }
         }
         Ok(())
     }
 
-    fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
+    fn cast_req<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
     where
         R: lsp_types::request::Request,
         R::Params: serde::de::DeserializeOwned,
