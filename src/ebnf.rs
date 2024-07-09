@@ -6,7 +6,7 @@ pub mod ebnf {
         bytes::complete::{escaped, tag},
         character::complete::{alpha1, alphanumeric1, char, multispace0, none_of, one_of},
         combinator::recognize,
-        error::{ErrorKind, ParseError, VerboseError, VerboseErrorKind},
+        error::{ErrorKind, ParseError},
         multi::{many0_count, many1},
         sequence::{delimited, pair, preceded, terminated},
         Err, IResult, Offset,
@@ -146,7 +146,6 @@ pub mod ebnf {
         }
     }
 
-    pub type Res<T, U> = IResult<T, U, VerboseError<T>>;
     pub type ERes<T, U> = IResult<T, U, EErr<T>>; // Extended IResult, with optional context
 
     fn parse_identifer(input: &str) -> ERes<&str, &str> {
@@ -167,10 +166,10 @@ pub mod ebnf {
         Ok((rest, lhs))
     }
 
-    fn find_non_terminals(rhs: &Expression) -> Vec<usize> {
+    fn find_non_terminals(rhs: &Expression) -> Vec<(usize, usize)> {
         match rhs {
             Expression::Optional(o) => find_non_terminals(o),
-            Expression::NonTerm(_, ptr) => vec![*ptr],
+            Expression::NonTerm(s, ptr) => vec![(s.len(), *ptr)],
             Expression::Repeated(x) => find_non_terminals(x),
             Expression::Symbol(a, _, b) => {
                 let mut non_terminals = find_non_terminals(a);
@@ -195,9 +194,11 @@ pub mod ebnf {
         lsp_context.complete_hover(rhs_str);
         let non_terminals = find_non_terminals(&rhs);
         for nt in non_terminals {
+            let length = nt.0;
+            let start_pos = nt.1 - lsp_context.doc_content.as_ptr() as usize;
             lsp_context.add_reference(
-                &rhs_str[..rhs_str.len() - 1],
-                lsp_context.offset_from_ptr(nt),
+                &lsp_context.doc_content[start_pos..start_pos + length],
+                lsp_context.offset_from_ptr(nt.1),
             );
         }
         Ok((rest, rhs))
@@ -387,6 +388,7 @@ pub mod ebnf {
         while !parse_context.is_empty() {
             let (rest, lhs) = parse_lhs(&mut lsp_context, parse_context)?;
             let (rest, rhs) = parse_rhs(&mut lsp_context, rest)?;
+            let (rest, _) = multispace0(rest)?;
             rules.push(Rule {
                 identifier: lhs.to_string(),
                 production: rhs,
@@ -396,5 +398,19 @@ pub mod ebnf {
         Ok((ebnf, Grammar { rules, lsp_context }))
     }
 
-    mod tests {}
+    mod tests {
+        #[test]
+        fn test_stuff() {
+            let ebnf =
+                "Hello There = Hello , ' ' , World;\nHello = \"Hello\";\nWorld = \"World!\";\n\n";
+            let (_, gram) = crate::ebnf::ebnf::parse_ebnf(ebnf).expect("Should parse fine");
+            println!("{:#?}", gram);
+        }
+        #[test]
+        fn test_stuff2() {
+            let ebnf = "very nice stuff = hello;\nhello = \"world\";\ncool = hello;";
+            let (_, gram) = crate::ebnf::ebnf::parse_ebnf(ebnf).expect("Should parse fine");
+            println!("{:#?}", gram);
+        }
+    }
 }

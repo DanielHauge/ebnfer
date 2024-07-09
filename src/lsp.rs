@@ -2,7 +2,6 @@ pub mod lsp {
     use std::collections::{BTreeMap, HashMap};
     use std::ops::Bound::Included;
 
-    use nom::error::VerboseError;
     use nom::Offset;
     use rangemap::RangeMap;
 
@@ -14,7 +13,7 @@ pub mod lsp {
 
     #[derive(Debug)]
     pub struct LspContext<'a> {
-        doc_content: &'a str,
+        pub doc_content: &'a str,
         definitions: HashMap<&'a str, Location>,
         hover: HashMap<&'a str, &'a str>,
         references: HashMap<&'a str, Vec<Location>>,
@@ -22,11 +21,6 @@ pub mod lsp {
         line_to_offset: HashMap<usize, usize>,  // Line Number -> Offset
         symbols: RangeMap<usize, &'a str>,
         last_lhs: Option<&'a str>,
-    }
-
-    pub struct LspError {
-        message: String,
-        location: Location,
     }
 
     impl<'a> LspContext<'a> {
@@ -57,6 +51,7 @@ pub mod lsp {
             ptr - self.doc_content.as_ptr() as usize
         }
 
+        #[allow(dead_code)]
         pub fn references(&self, symbol: &'a str) -> Option<&Vec<Location>> {
             self.references.get(symbol)
         }
@@ -165,6 +160,31 @@ pub mod lsp {
                 .sylbol_from_location(crate::lsp::lsp::Location { line: 1, col: 24 })
                 .expect("To be there");
             assert_eq!(actual1, "hello");
+        }
+
+        #[test]
+        fn test_hover3() {
+            let ebnf =
+                "World = \"World!\";\nHello = \"Hello\";\nHello There = Hello , ' ' , World;";
+            let (_, gram) = crate::ebnf::ebnf::parse_ebnf(ebnf).expect("Should parse fine");
+            // print grtam
+            println!("{:#?}", gram);
+            let lsp_context = gram.lsp_context;
+            let hello_hover = lsp_context
+                .hover(crate::lsp::lsp::Location { line: 2, col: 17 })
+                .expect("Hello hover should be there");
+            assert_eq!(hello_hover, "\"Hello\";")
+        }
+
+        #[test]
+        fn test_hover2() {
+            let ebnf = "hello = \"world\";\ncool = hello;";
+            let (_, gram) = crate::ebnf::ebnf::parse_ebnf(ebnf).expect("Should parse fine");
+            let lsp_context = gram.lsp_context;
+            let hello_hover = lsp_context
+                .hover(crate::lsp::lsp::Location { line: 1, col: 11 })
+                .expect("Hello hover should be there");
+            assert_eq!(hello_hover, "\"world\";")
         }
 
         #[test]
