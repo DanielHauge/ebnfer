@@ -1,12 +1,10 @@
-use ebnf::ebnf::parse_ebnf;
 use ipc::ipc::start;
 
-mod ebnf;
 mod ipc;
 mod lsp;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // let ebnf = "very nice stuff = hello;\nhello = \"world\";\ncool = hello;";
+    let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
     // // let ebnf =
     // //     "Hello There = Hello , ' ' , World;\nHello = \"Hello\";\n    World = \"World!\";\n   ";
     // let test = parse_ebnf(ebnf);
@@ -20,5 +18,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //         nom::Err::Failure(f) => panic!("Failure: {:?}", f),
     //     },
     // }
+    let lexer = ebnf_parser::Lexer::new(ebnf);
+    let parser = ebnf_parser::Parser::new(lexer);
+    let gg = parser.parse();
+    match gg {
+        Ok(x) => println!("{:#?}", x),
+        Err(e) => eprintln!("{:?}", e),
+    }
     start()
 }

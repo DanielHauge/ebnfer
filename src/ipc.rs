@@ -8,8 +8,8 @@ pub mod ipc {
     use lsp_types::notification::{self, DidOpenTextDocument, Notification};
     use lsp_types::request::HoverRequest;
     use lsp_types::{
-        DidOpenTextDocumentParams, Hover, HoverParams, HoverProviderCapability, OneOf,
-        TextDocumentSyncCapability, TextDocumentSyncKind,
+        DidOpenTextDocumentParams, Hover, HoverParams, HoverProviderCapability, LanguageString,
+        OneOf, TextDocumentSyncCapability, TextDocumentSyncKind,
     };
     use lsp_types::{InitializeParams, ServerCapabilities};
 
@@ -18,7 +18,6 @@ pub mod ipc {
     };
     use serde_json::Value;
 
-    use crate::ebnf::ebnf::parse_ebnf;
     use crate::lsp::lsp::Location;
     // https://github.com/rust-lang/rust-analyzer/blob/master/lib/lsp-server/examples/goto_def.rs
 
@@ -162,27 +161,35 @@ pub mod ipc {
         let doc = docs.get(&uri).ok_or("Document not found")?;
         // Log doc to file
         log_file(&format!("Document: {doc:?}"));
-        let lsp_context = match parse_ebnf(doc) {
-            Ok(ctx) => ctx.1.lsp_context,
-            Err(e) => return Err(format!("Document Error: {:?}", e)),
-        };
-        let location = Location {
-            line: params.text_document_position_params.position.line as usize,
-            col: params.text_document_position_params.position.character as usize,
-        };
-        let hover = lsp_context
-            .hover(location)
-            .ok_or("No hover information found")?;
-        let result = Some(Hover {
-            range: None,
-            contents: lsp_types::HoverContents::Scalar(lsp_types::MarkedString::String(
-                hover.to_string(),
-            )),
-        });
-        let json_result = serde_json::to_value(result).map_err(|e| e.to_string())?;
+        // let lsp_context = match parse_ebnf(doc) {
+        //     Ok(ctx) => ctx.1.lsp_context,
+        //     Err(e) => return Err(format!("Document Error: {:?}", e)),
+        // };
+        // let location = Location {
+        //     line: params.text_document_position_params.position.line as usize,
+        //     col: params.text_document_position_params.position.character as usize,
+        // };
+        // let hover = lsp_context
+        //     .hover(location)
+        //     .ok_or("No hover information found")?;
+        // let result = Some(Hover {
+        //     range: None,
+        //     contents: lsp_types::HoverContents::Scalar(lsp_types::MarkedString::LanguageString(
+        //         LanguageString {
+        //             language: "bnf".to_string(),
+        //             value: hover.to_string(),
+        //         },
+        //     )),
+        // });
+        // let json_result = serde_json::to_value(result).map_err(|e| e.to_string())?;
+        // Ok(Message::Response(Response {
+        //     id,
+        //     result: Some(json_result),
+        //     error: None,
+        // }))
         Ok(Message::Response(Response {
             id,
-            result: Some(json_result),
+            result: None,
             error: None,
         }))
     }
