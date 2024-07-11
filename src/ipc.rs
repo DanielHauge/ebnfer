@@ -18,7 +18,7 @@ pub mod ipc {
     };
     use serde_json::Value;
 
-    use crate::lsp::lsp::Location;
+    use crate::lsp::lsp::{Location, LspContext};
     // https://github.com/rust-lang/rust-analyzer/blob/master/lib/lsp-server/examples/goto_def.rs
 
     pub fn start() -> Result<(), Box<dyn Error>> {
@@ -84,6 +84,7 @@ pub mod ipc {
     ) -> Result<(), Box<dyn Error + Sync + Send>> {
         let _params: InitializeParams = serde_json::from_value(params).unwrap();
         let mut docs: HashMap<String, String> = HashMap::new();
+        let mut lsp_context: HashMap<String, Result<LspContext, String>> = HashMap::new();
         for msg in &connection.receiver {
             match msg {
                 Message::Request(req) => {
@@ -113,20 +114,34 @@ pub mod ipc {
                             let params: DidOpenTextDocumentParams =
                                 not.extract(DidOpenTextDocument::METHOD).unwrap();
                             log_file(&format!("{params:?}"));
-                            docs.insert(
-                                params.text_document.uri.to_string(),
-                                params.text_document.text.to_string(),
-                            );
+                            match parse_ebnf(&params.text_document.text) {
+                                Ok(ctx) => {
+                                    lsp_context
+                                        .insert(params.text_document.uri.to_string(), Ok(ctx));
+                                }
+                                Err(e) => {
+                                    lsp_context
+                                        .insert(params.text_document.uri.to_string(), Err(e));
+                                }
+                            }
+                            // Send diagnostics errors?
                         }
                         notification::DidChangeTextDocument::METHOD => {
                             let params: lsp_types::DidChangeTextDocumentParams = not
                                 .extract(lsp_types::notification::DidChangeTextDocument::METHOD)
                                 .unwrap();
                             log_file(&format!("{params:?}"));
-                            docs.insert(
-                                params.text_document.uri.to_string(),
-                                params.content_changes[0].text.to_string(),
-                            );
+                            match parse_ebnf(&params.content_changes[0].text) {
+                                Ok(ctx) => {
+                                    lsp_context
+                                        .insert(params.text_document.uri.to_string(), Ok(ctx));
+                                }
+                                Err(e) => {
+                                    lsp_context
+                                        .insert(params.text_document.uri.to_string(), Err(e));
+                                }
+                            }
+                            // Send diagnostics errors?
                         }
                         _ => {}
                     }
@@ -134,6 +149,16 @@ pub mod ipc {
             }
         }
         Ok(())
+    }
+
+    fn parse_ebnf(doc: &str) -> Result<LspContext, String> {
+        let lexer = ebnf_parser::Lexer::new(doc);
+        let parser = ebnf_parser::Parser::new(lexer);
+        let parse_results = parser.parse();
+        match parse_results {
+            Ok(x) => Ok(LspContext::from_parse_results(doc, &x)),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     fn error(msg: &str, id: RequestId) -> Message {
