@@ -4,6 +4,7 @@ pub mod lsp {
     use std::ops::Bound::Included;
 
     use ebnf_parser::ast::SingleDefinition;
+    use ebnf_parser::error::SyntaxError;
     use ebnf_parser::ParseResult;
     use nom::Offset;
     use rangemap::RangeMap;
@@ -22,10 +23,26 @@ pub mod lsp {
         offset_to_line: BTreeMap<usize, usize>, // Offset -> Line number
         line_to_offset: HashMap<usize, usize>,  // Line Number -> Offset
         symbols: RangeMap<usize, String>,
+        syntax_error: Option<SyntaxError>,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum LspErrorType {
+        SyntaxError,
+        UnusedDefinition,
+        UndefinedReference,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct LspError {
+        pub message: String,
+        pub start: Location,
+        pub end: Location,
+        pub error_type: LspErrorType,
     }
 
     impl LspContext {
-        pub fn from_parse_results(doc_content: &str, parse_results: &ParseResult) -> Self {
+        pub fn from_src(doc_content: &str) -> Self {
             let mut offset_to_line = BTreeMap::new();
             let mut line_to_offset = HashMap::new();
             doc_content
@@ -44,8 +61,16 @@ pub mod lsp {
                 offset_to_line,
                 line_to_offset,
                 symbols: RangeMap::new(),
+                syntax_error: None,
             };
-            lsp_context.compute_lsp_context(doc_content, parse_results);
+
+            let lexer = ebnf_parser::Lexer::new(doc_content);
+            let parser = ebnf_parser::Parser::new(lexer);
+            let parse_results = parser.parse();
+            match parse_results {
+                Ok(x) => lsp_context.compute_lsp_context(doc_content, &x),
+                Err(e) => lsp_context.syntax_error = Some(e),
+            }
             lsp_context
         }
 
@@ -54,10 +79,6 @@ pub mod lsp {
             for rule in &parse_results.syntax.rules {
                 let loc = self.location_at_offset(rule.span.start);
                 self.definitions.insert(rule.name.to_string(), loc.clone());
-                self.references
-                    .entry(rule.name.to_string())
-                    .or_insert_with(Vec::new)
-                    .push(loc);
                 let hover_span = rule.span.start..rule.span.end;
                 let hover_text = doc_content[hover_span].to_string();
                 self.hover.insert(rule.name.to_string(), hover_text);
@@ -115,7 +136,7 @@ pub mod lsp {
                 })
         }
 
-        fn location_at_offset(&self, offset: usize) -> Location {
+        pub fn location_at_offset(&self, offset: usize) -> Location {
             let line_offsets = self
                 .offset_to_line
                 .range((Included(0), Included(offset)))
@@ -135,10 +156,80 @@ pub mod lsp {
             }
         }
 
+        fn syntax_error_to_lsp_error(&self) -> Option<LspError> {
+            match &self.syntax_error {
+                Some(x) => Some(LspError {
+                    message: x.message.clone(),
+                    start: self.location_at_offset(x.span.start),
+                    end: self.location_at_offset(x.span.end),
+                    error_type: LspErrorType::SyntaxError,
+                }),
+                None => None,
+            }
+        }
+
         fn offset_at_location(&self, location: &Location) -> usize {
             let line_number = location.line;
             let line_offset = self.line_to_offset.get(&line_number).unwrap_or(&0);
             line_offset + location.col
+        }
+
+        pub fn diagnostics(&self) -> Vec<LspError> {
+            let syntax_error = self.syntax_error_to_lsp_error();
+            if let Some(e) = syntax_error {
+                return vec![e];
+            }
+
+            let unused_defs = self
+                .definitions
+                .keys()
+                .filter(|k| self.references.get(*k).is_none())
+                .map(|k| {
+                    let start = self.definitions.get(k).unwrap();
+                    let end = Location {
+                        line: start.line,
+                        col: start.col + k.len(),
+                    };
+                    LspError {
+                        message: format!("Unused definition: {}", k),
+                        start: start.clone(),
+                        end,
+                        error_type: LspErrorType::UnusedDefinition,
+                    }
+                });
+
+            let undefined_refs: Vec<LspError> = self
+                .references
+                .keys()
+                .filter(|k| self.definitions.get(*k).is_none())
+                .map(|k| {
+                    let gg: Vec<LspError> = self
+                        .references
+                        .get(k)
+                        .unwrap()
+                        .into_iter()
+                        .map(|r| {
+                            let end = Location {
+                                line: r.line,
+                                col: r.col + k.len(),
+                            };
+                            LspError {
+                                message: format!("Undefined reference: {}", k),
+                                start: r.clone(),
+                                end,
+                                error_type: LspErrorType::UndefinedReference,
+                            }
+                        })
+                        .collect();
+                    gg
+                })
+                .flatten()
+                .collect();
+
+            let mut diagnostics = Vec::new();
+            diagnostics.extend(unused_defs);
+            diagnostics.extend(undefined_refs);
+            diagnostics
         }
 
         pub fn hover(&self, location: &Location) -> Option<&str> {
@@ -165,18 +256,10 @@ pub mod lsp {
 
         use crate::lsp::lsp::Location;
 
-        fn parse_test_example<'src>() -> (&'src str, ParseResult<'src>) {
-            let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
-            let lexer = ebnf_parser::Lexer::new(&ebnf);
-            let parser = ebnf_parser::Parser::new(lexer);
-            let parse_result = parser.parse().expect("Should be able to parse");
-            (ebnf, parse_result)
-        }
-
         #[test]
         fn test_hovers() {
-            let (ebnf, parse_result) = parse_test_example();
-            let lsp_context = super::LspContext::from_parse_results(ebnf, &parse_result);
+            let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
+            let lsp_context = super::LspContext::from_src(ebnf);
             let hover = lsp_context.hover.get("hello").unwrap();
             assert_eq!(hover, "hello = \"world\";");
             let hover = lsp_context.hover.get("cool").unwrap();
@@ -188,8 +271,9 @@ pub mod lsp {
 
         #[test]
         fn test_refs() {
-            let (ebnf, parse_result) = parse_test_example();
-            let lsp_context = super::LspContext::from_parse_results(ebnf, &parse_result);
+            let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
+
+            let lsp_context = super::LspContext::from_src(ebnf);
             let refs = lsp_context.references.get("hello").unwrap();
             assert_eq!(refs.len(), 3);
             assert_eq!(refs[0], Location { line: 0, col: 18 });
@@ -207,8 +291,8 @@ pub mod lsp {
 
         #[test]
         fn test_defs() {
-            let (ebnf, parse_result) = parse_test_example();
-            let lsp_context = super::LspContext::from_parse_results(ebnf, &parse_result);
+            let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
+            let lsp_context = super::LspContext::from_src(ebnf);
             let hello_def_loc = lsp_context.definitions.get("hello").unwrap();
             assert_eq!(hello_def_loc, &Location { line: 1, col: 0 });
             let hello_def_loc = lsp_context

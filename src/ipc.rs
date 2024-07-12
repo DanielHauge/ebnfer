@@ -6,19 +6,22 @@ pub mod ipc {
     use std::error::Error;
 
     use lsp_types::notification::{self, DidOpenTextDocument, Notification};
-    use lsp_types::request::{HoverRequest, Request};
+    use lsp_types::request::HoverRequest;
     use lsp_types::{
-        DidOpenTextDocumentParams, Hover, HoverParams, HoverProviderCapability, LanguageString,
-        MarkedString, OneOf, Position, TextDocumentSyncCapability, TextDocumentSyncKind,
+        request::Request, DiagnosticServerCapabilities, DidOpenTextDocumentParams, Hover,
+        HoverParams, HoverProviderCapability, LanguageString, MarkedString, OneOf, Position,
+        TextDocumentSyncCapability, TextDocumentSyncKind,
+    };
+    use lsp_types::{
+        Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
+        FullDocumentDiagnosticReport,
     };
     use lsp_types::{InitializeParams, ServerCapabilities};
 
-    use lsp_server::{
-        Connection, ExtractError, Message, Request, RequestId, Response, ResponseError,
-    };
+    use lsp_server::{Connection, Message, RequestId, Response, ResponseError};
     use serde_json::Value;
 
-    use crate::lsp::lsp::{Location, LspContext};
+    use crate::lsp::lsp::{Location, LspContext, LspError};
     // https://github.com/rust-lang/rust-analyzer/blob/master/lib/lsp-server/examples/goto_def.rs
 
     pub fn start() -> Result<(), Box<dyn Error>> {
@@ -27,19 +30,19 @@ pub mod ipc {
         let (connection, io_threads) = Connection::stdio();
 
         let server_capabilities = serde_json::to_value(&ServerCapabilities {
-            // diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
-            //     work_done_progress_options: Default::default(),
-            //     identifier: None,
-            //     workspace_diagnostics: false,
-            //     inter_file_dependencies: false,
-            // })),
+            diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                work_done_progress_options: Default::default(),
+                identifier: None,
+                workspace_diagnostics: false,
+                inter_file_dependencies: false,
+            })),
             text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
             definition_provider: Some(OneOf::Left(true)),
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             references_provider: Some(OneOf::Left(true)),
             rename_provider: Some(OneOf::Left(true)),
             completion_provider: None,
-            diagnostic_provider: None,
+            // diagnostic_provider: None,
             declaration_provider: None,
             implementation_provider: None,
             type_definition_provider: None,
@@ -83,7 +86,7 @@ pub mod ipc {
         params: Value,
     ) -> Result<(), Box<dyn Error + Sync + Send>> {
         let _params: InitializeParams = serde_json::from_value(params).unwrap();
-        let mut lsp_context: HashMap<String, Result<LspContext, String>> = HashMap::new();
+        let mut lsp_context: HashMap<String, LspContext> = HashMap::new();
         for msg in &connection.receiver {
             match msg {
                 Message::Request(req) => {
@@ -102,9 +105,20 @@ pub mod ipc {
                             }
                         }
                         lsp_types::request::References::METHOD => {
-                            let (id, param): (RequestId, lsp_types::ReferenceParams) = req
+                            let (_id, _param): (RequestId, lsp_types::ReferenceParams) = req
                                 .extract(lsp_types::request::References::METHOD)
                                 .expect("Failed to cast");
+                        }
+                        lsp_types::request::DocumentDiagnosticRequest::METHOD => {
+                            let (id, param): (RequestId, lsp_types::DocumentDiagnosticParams) = req
+                                .extract(lsp_types::request::DocumentDiagnosticRequest::METHOD)
+                                .expect("Failed to cast");
+                            match diagnostics(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
+
+                            // let context = lsp_context.get(_param.text_document.uri.as_str())
                         }
                         _ => {}
                     }
@@ -122,34 +136,20 @@ pub mod ipc {
                             let params: DidOpenTextDocumentParams =
                                 not.extract(DidOpenTextDocument::METHOD).unwrap();
                             log_file(&format!("{params:?}"));
-                            match parse_ebnf(&params.text_document.text) {
-                                Ok(ctx) => {
-                                    lsp_context
-                                        .insert(params.text_document.uri.to_string(), Ok(ctx));
-                                }
-                                Err(e) => {
-                                    lsp_context
-                                        .insert(params.text_document.uri.to_string(), Err(e));
-                                }
-                            }
-                            // Send diagnostics errors?
+                            lsp_context.insert(
+                                params.text_document.uri.to_string(),
+                                LspContext::from_src(&params.text_document.text),
+                            );
                         }
                         notification::DidChangeTextDocument::METHOD => {
                             let params: lsp_types::DidChangeTextDocumentParams = not
                                 .extract(lsp_types::notification::DidChangeTextDocument::METHOD)
                                 .unwrap();
                             log_file(&format!("{params:?}"));
-                            match parse_ebnf(&params.content_changes[0].text) {
-                                Ok(ctx) => {
-                                    lsp_context
-                                        .insert(params.text_document.uri.to_string(), Ok(ctx));
-                                }
-                                Err(e) => {
-                                    lsp_context
-                                        .insert(params.text_document.uri.to_string(), Err(e));
-                                }
-                            }
-                            // Send diagnostics errors?
+                            lsp_context.insert(
+                                params.text_document.uri.to_string(),
+                                LspContext::from_src(&params.content_changes[0].text),
+                            );
                         }
                         _ => {}
                     }
@@ -157,16 +157,6 @@ pub mod ipc {
             }
         }
         Ok(())
-    }
-
-    fn parse_ebnf(doc: &str) -> Result<LspContext, String> {
-        let lexer = ebnf_parser::Lexer::new(doc);
-        let parser = ebnf_parser::Parser::new(lexer);
-        let parse_results = parser.parse();
-        match parse_results {
-            Ok(x) => Ok(LspContext::from_parse_results(doc, &x)),
-            Err(e) => Err(e.to_string()),
-        }
     }
 
     fn error(msg: &str, id: RequestId) -> Message {
@@ -190,8 +180,64 @@ pub mod ipc {
         }
     }
 
+    impl Into<Diagnostic> for LspError {
+        fn into(self) -> Diagnostic {
+            let severity = match self.error_type {
+                crate::lsp::lsp::LspErrorType::SyntaxError => DiagnosticSeverity::ERROR,
+                crate::lsp::lsp::LspErrorType::UnusedDefinition => DiagnosticSeverity::WARNING,
+                crate::lsp::lsp::LspErrorType::UndefinedReference => DiagnosticSeverity::ERROR,
+            };
+            let tags = match self.error_type {
+                crate::lsp::lsp::LspErrorType::UnusedDefinition => {
+                    Some(vec![DiagnosticTag::UNNECESSARY])
+                }
+                _ => None,
+            };
+            Diagnostic {
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: self.start.line as u32,
+                        character: self.start.col as u32,
+                    },
+                    end: lsp_types::Position {
+                        line: self.end.line as u32,
+                        character: self.end.col as u32,
+                    },
+                },
+                severity: Some(severity),
+                code: None,
+                source: None,
+                message: self.message,
+                related_information: None,
+                tags,
+                code_description: None,
+                data: None,
+            }
+        }
+    }
+
+    fn diagnostics(
+        lsp_context: &HashMap<String, LspContext>,
+        id: RequestId,
+        params: DocumentDiagnosticParams,
+    ) -> Result<Message, String> {
+        let uri = params.text_document.uri.to_string();
+        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let items = ctx.diagnostics().into_iter().map(|x| x.into()).collect();
+        let report = FullDocumentDiagnosticReport {
+            items,
+            result_id: None,
+        };
+        let json_result = serde_json::to_value(report).expect("Failed to serialize");
+        Ok(Message::Response(Response {
+            id,
+            result: Some(json_result),
+            error: None,
+        }))
+    }
+
     fn hover(
-        lsp_context: &HashMap<String, Result<LspContext, String>>,
+        lsp_context: &HashMap<String, LspContext>,
         id: RequestId,
         params: HoverParams,
     ) -> Result<Message, String> {
@@ -201,37 +247,33 @@ pub mod ipc {
             .uri
             .to_string();
 
-        match lsp_context.get(&uri) {
-            Some(Ok(ctx)) => {
-                let hover = match ctx.hover(&Location::from(
-                    params.text_document_position_params.position,
-                )) {
-                    Some(x) => x.trim().to_string(),
-                    None => {
-                        return Ok(Message::Response(Response {
-                            id,
-                            result: None,
-                            error: None,
-                        }))
-                    }
-                };
-                let marked_string = MarkedString::LanguageString(LanguageString {
-                    language: "ebnf".to_string(),
-                    value: hover.trim().to_string(),
-                });
-                let result = Some(Hover {
-                    range: None,
-                    contents: lsp_types::HoverContents::Scalar(marked_string),
-                });
-                let json_result = serde_json::to_value(result).expect("Failed to serialize");
-                Ok(Message::Response(Response {
+        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+
+        let hover = match ctx.hover(&Location::from(
+            params.text_document_position_params.position,
+        )) {
+            Some(x) => x.trim().to_string(),
+            None => {
+                return Ok(Message::Response(Response {
                     id,
-                    result: Some(json_result),
+                    result: None,
                     error: None,
                 }))
             }
-            Some(Err(e)) => Err(e.to_string()),
-            None => Err("No document found".to_string()),
-        }
+        };
+        let marked_string = MarkedString::LanguageString(LanguageString {
+            language: "ebnf".to_string(),
+            value: hover.trim().to_string(),
+        });
+        let result = Some(Hover {
+            range: None,
+            contents: lsp_types::HoverContents::Scalar(marked_string),
+        });
+        let json_result = serde_json::to_value(result).expect("Failed to serialize");
+        Ok(Message::Response(Response {
+            id,
+            result: Some(json_result),
+            error: None,
+        }))
     }
 }

@@ -18,15 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //         nom::Err::Failure(f) => panic!("Failure: {:?}", f),
     //     },
     // }
-    let lexer = ebnf_parser::Lexer::new(&ebnf);
-    let parser = ebnf_parser::Parser::new(lexer);
-    let gg = parser.parse();
-    match gg {
-        Ok(x) => {
-            let _lol = lsp::lsp::LspContext::from_parse_results(ebnf, &x);
-            println!("{:#?}", x)
-        }
-        Err(e) => eprintln!("{:?}", e),
-    }
+    let _lol = lsp::lsp::LspContext::from_src(ebnf);
+    println!("{:#?}", _lol);
     start()
 }
