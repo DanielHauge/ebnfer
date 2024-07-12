@@ -6,10 +6,10 @@ pub mod ipc {
     use std::error::Error;
 
     use lsp_types::notification::{self, DidOpenTextDocument, Notification};
-    use lsp_types::request::HoverRequest;
+    use lsp_types::request::{HoverRequest, Request};
     use lsp_types::{
         DidOpenTextDocumentParams, Hover, HoverParams, HoverProviderCapability, LanguageString,
-        OneOf, TextDocumentSyncCapability, TextDocumentSyncKind,
+        MarkedString, OneOf, Position, TextDocumentSyncCapability, TextDocumentSyncKind,
     };
     use lsp_types::{InitializeParams, ServerCapabilities};
 
@@ -83,7 +83,6 @@ pub mod ipc {
         params: Value,
     ) -> Result<(), Box<dyn Error + Sync + Send>> {
         let _params: InitializeParams = serde_json::from_value(params).unwrap();
-        let mut docs: HashMap<String, String> = HashMap::new();
         let mut lsp_context: HashMap<String, Result<LspContext, String>> = HashMap::new();
         for msg in &connection.receiver {
             match msg {
@@ -93,12 +92,21 @@ pub mod ipc {
                     }
                     log_file(&format!("{req:?}"));
 
-                    match cast_req::<HoverRequest>(req) {
-                        Ok((id, hov_req)) => match hover(&docs, id.clone(), hov_req) {
-                            Ok(x) => connection.sender.send(x).unwrap(),
-                            Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                        },
-                        Err(_) => todo!(),
+                    match req.method.as_str() {
+                        lsp_types::request::HoverRequest::METHOD => {
+                            let (id, param) =
+                                req.extract(HoverRequest::METHOD).expect("Cast failed");
+                            match hover(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
+                        }
+                        lsp_types::request::References::METHOD => {
+                            let (id, param): (RequestId, lsp_types::ReferenceParams) = req
+                                .extract(lsp_types::request::References::METHOD)
+                                .expect("Failed to cast");
+                        }
+                        _ => {}
                     }
                 }
                 Message::Response(resp) => {
@@ -173,8 +181,17 @@ pub mod ipc {
         })
     }
 
+    impl From<Position> for Location {
+        fn from(pos: Position) -> Self {
+            Location {
+                line: pos.line as usize,
+                col: pos.character as usize,
+            }
+        }
+    }
+
     fn hover(
-        docs: &HashMap<String, String>,
+        lsp_context: &HashMap<String, Result<LspContext, String>>,
         id: RequestId,
         params: HoverParams,
     ) -> Result<Message, String> {
@@ -183,47 +200,38 @@ pub mod ipc {
             .text_document
             .uri
             .to_string();
-        let doc = docs.get(&uri).ok_or("Document not found")?;
-        // Log doc to file
-        log_file(&format!("Document: {doc:?}"));
-        // let lsp_context = match parse_ebnf(doc) {
-        //     Ok(ctx) => ctx.1.lsp_context,
-        //     Err(e) => return Err(format!("Document Error: {:?}", e)),
-        // };
-        // let location = Location {
-        //     line: params.text_document_position_params.position.line as usize,
-        //     col: params.text_document_position_params.position.character as usize,
-        // };
-        // let hover = lsp_context
-        //     .hover(location)
-        //     .ok_or("No hover information found")?;
-        // let result = Some(Hover {
-        //     range: None,
-        //     contents: lsp_types::HoverContents::Scalar(lsp_types::MarkedString::LanguageString(
-        //         LanguageString {
-        //             language: "bnf".to_string(),
-        //             value: hover.to_string(),
-        //         },
-        //     )),
-        // });
-        // let json_result = serde_json::to_value(result).map_err(|e| e.to_string())?;
-        // Ok(Message::Response(Response {
-        //     id,
-        //     result: Some(json_result),
-        //     error: None,
-        // }))
-        Ok(Message::Response(Response {
-            id,
-            result: None,
-            error: None,
-        }))
-    }
 
-    fn cast_req<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
-    where
-        R: lsp_types::request::Request,
-        R::Params: serde::de::DeserializeOwned,
-    {
-        req.extract(R::METHOD)
+        match lsp_context.get(&uri) {
+            Some(Ok(ctx)) => {
+                let hover = match ctx.hover(&Location::from(
+                    params.text_document_position_params.position,
+                )) {
+                    Some(x) => x.trim().to_string(),
+                    None => {
+                        return Ok(Message::Response(Response {
+                            id,
+                            result: None,
+                            error: None,
+                        }))
+                    }
+                };
+                let marked_string = MarkedString::LanguageString(LanguageString {
+                    language: "ebnf".to_string(),
+                    value: hover.trim().to_string(),
+                });
+                let result = Some(Hover {
+                    range: None,
+                    contents: lsp_types::HoverContents::Scalar(marked_string),
+                });
+                let json_result = serde_json::to_value(result).expect("Failed to serialize");
+                Ok(Message::Response(Response {
+                    id,
+                    result: Some(json_result),
+                    error: None,
+                }))
+            }
+            Some(Err(e)) => Err(e.to_string()),
+            None => Err("No document found".to_string()),
+        }
     }
 }

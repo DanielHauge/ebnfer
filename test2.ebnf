@@ -1,3 +1,5 @@
-very nice stuff = hello;
-hello = "world";
+very_nice_stuff = hello;
+hello = "world" | yo;
+yo = "world" | hello;
+
 cool = hello;
