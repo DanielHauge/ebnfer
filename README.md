@@ -22,3 +22,4 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [ ] Type definition
 - [ ] Code actions
 - [X] Semantic tokens Root rule
+- [ ] Workspace support - multiple files
