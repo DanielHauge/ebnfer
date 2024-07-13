@@ -9,9 +9,10 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 
 - [x] Syntax error diagnostics
 - [x] Hover information
-- [ ] Multi definitions handling
-- [ ] References
+- [x] Multi definitions handling
+- [x] References
 - [ ] Recursive hover information
+- [ ] Multi definition hover information
 - [ ] Completion
 - [ ] Document symbols
 - [ ] Document formatting
