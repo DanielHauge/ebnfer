@@ -11,9 +11,9 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [x] Hover information
 - [x] Multi definitions handling
 - [x] References
-- [ ] Recursive hover information
-- [ ] Multi definition hover information
 - [ ] Completion
+- [ ] Multi definition hover information
+- [ ] Recursive hover information
 - [ ] Document symbols
 - [ ] Document formatting
 - [ ] go to definition
@@ -21,4 +21,4 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [ ] Declaration
 - [ ] Type definition
 - [ ] Code actions
-- [ ] Semantic tokens (Root rule, recursive rule)
+- [X] Semantic tokens Root rule

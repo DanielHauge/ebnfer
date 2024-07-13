@@ -14,7 +14,8 @@ pub mod ipc {
     };
     use lsp_types::{
         Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
-        FullDocumentDiagnosticReport, ReferenceParams, Uri,
+        FullDocumentDiagnosticReport, ReferenceParams, SemanticToken, SemanticTokenModifier,
+        SemanticTokenType, SemanticTokensLegend, SemanticTokensParams, SemanticTokensResult, Uri,
     };
     use lsp_types::{InitializeParams, ServerCapabilities};
 
@@ -42,17 +43,29 @@ pub mod ipc {
             references_provider: Some(OneOf::Left(true)),
             rename_provider: Some(OneOf::Left(true)),
             completion_provider: None,
-            // diagnostic_provider: None,
             declaration_provider: None,
             implementation_provider: None,
             type_definition_provider: None,
-            document_highlight_provider: None,
+            // document_highlight_provider: Some(OneOf::Left(true)),
             document_formatting_provider: None,
             document_range_formatting_provider: None,
             document_on_type_formatting_provider: None,
             code_action_provider: None,
             document_symbol_provider: None,
-            semantic_tokens_provider: None,
+            semantic_tokens_provider: Some(
+                lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
+                    lsp_types::SemanticTokensOptions {
+                        work_done_progress_options: Default::default(),
+                        legend: SemanticTokensLegend {
+                            token_types: vec![SemanticTokenType::ENUM_MEMBER],
+                            token_modifiers: vec![SemanticTokenModifier::STATIC],
+                        },
+                        range: None,
+                        // full: None,
+                        full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
+                    },
+                ),
+            ),
             ..Default::default()
         })
         .unwrap();
@@ -126,6 +139,15 @@ pub mod ipc {
                             }
 
                             // let context = lsp_context.get(_param.text_document.uri.as_str())
+                        }
+                        lsp_types::request::SemanticTokensFullRequest::METHOD => {
+                            let (id, param): (RequestId, lsp_types::SemanticTokensParams) = req
+                                .extract(lsp_types::request::SemanticTokensFullRequest::METHOD)
+                                .expect("Failed to cast");
+                            match semantic_tokens(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
                         }
                         _ => {}
                     }
@@ -243,6 +265,32 @@ pub mod ipc {
                 data: None,
             }
         }
+    }
+
+    fn semantic_tokens(
+        lsp_context: &HashMap<String, LspContext>,
+        id: RequestId,
+        params: SemanticTokensParams,
+    ) -> Result<Message, String> {
+        let uri = params.text_document.uri.to_string();
+        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let tokens = ctx.root_rule().ok_or("No root rule found")?;
+        let result = SemanticTokensResult::Tokens(lsp_types::SemanticTokens {
+            result_id: None,
+            data: vec![SemanticToken {
+                delta_line: tokens.0.line as u32,
+                delta_start: tokens.0.col as u32,
+                length: (tokens.1.col - tokens.0.col) as u32,
+                token_type: 0,
+                token_modifiers_bitset: 0,
+            }],
+        });
+        let json_result = serde_json::to_value(result).expect("Failed to serialize");
+        Ok(Message::Response(Response {
+            id,
+            result: Some(json_result),
+            error: None,
+        }))
     }
 
     fn references(

@@ -21,8 +21,8 @@ pub mod lsp {
         alternative_definitions: HashMap<String, Vec<Location>>,
         hover: HashMap<String, String>,
         references: HashMap<String, Vec<Location>>,
-        offset_to_line: BTreeMap<usize, usize>, // Offset -> Line number
-        line_to_offset: HashMap<usize, usize>,  // Line Number -> Offset
+        offset_to_line: BTreeMap<usize, usize>,
+        line_to_offset: HashMap<usize, usize>,
         symbols: RangeMap<usize, String>,
         syntax_error: Option<SyntaxError>,
     }
@@ -184,14 +184,8 @@ pub mod lsp {
             line_offset + location.col
         }
 
-        pub fn diagnostics(&self) -> Vec<LspError> {
-            let syntax_error = self.syntax_error_to_lsp_error();
-            if let Some(e) = syntax_error {
-                return vec![e];
-            }
-
-            let unused_defs = self
-                .definitions
+        fn unused_defs(&self) -> Vec<LspError> {
+            self.definitions
                 .keys()
                 .filter(|k| self.references.get(*k).is_none())
                 .map(|k| {
@@ -225,8 +219,26 @@ pub mod lsp {
                     v.extend(other_defs);
                     v
                 })
-                .flatten();
+                .flatten()
+                .collect()
+        }
 
+        pub fn root_rule(&self) -> Option<(Location, Location)> {
+            let unused_defs = self.unused_defs();
+            if unused_defs.len() == 1 {
+                Some((unused_defs[0].start.clone(), unused_defs[0].end.clone()))
+            } else {
+                None
+            }
+        }
+
+        pub fn diagnostics(&self) -> Vec<LspError> {
+            let syntax_error = self.syntax_error_to_lsp_error();
+            if let Some(e) = syntax_error {
+                return vec![e];
+            }
+
+            let unused_defs = self.unused_defs();
             let undefined_refs: Vec<LspError> = self
                 .references
                 .keys()
@@ -256,7 +268,9 @@ pub mod lsp {
                 .collect();
 
             let mut diagnostics = Vec::new();
-            diagnostics.extend(unused_defs);
+            if unused_defs.len() > 1 {
+                diagnostics.extend(unused_defs);
+            }
             diagnostics.extend(undefined_refs);
             diagnostics
         }
@@ -309,18 +323,16 @@ pub mod lsp {
 
             let lsp_context = super::LspContext::from_src(ebnf);
             let refs = lsp_context.references.get("hello").unwrap();
-            assert_eq!(refs.len(), 3);
+            assert_eq!(refs.len(), 2);
             assert_eq!(refs[0], Location { line: 0, col: 18 });
-            assert_eq!(refs[1], Location { line: 1, col: 0 });
-            assert_eq!(refs[2], Location { line: 2, col: 7 });
+            assert_eq!(refs[1], Location { line: 2, col: 7 });
 
             let refs = lsp_context
                 .references(&Location { line: 2, col: 10 })
                 .expect("Should have refs");
-            assert_eq!(refs.len(), 3);
+            assert_eq!(refs.len(), 2);
             assert_eq!(refs[0], Location { line: 0, col: 18 });
-            assert_eq!(refs[1], Location { line: 1, col: 0 });
-            assert_eq!(refs[2], Location { line: 2, col: 7 });
+            assert_eq!(refs[1], Location { line: 2, col: 7 });
         }
 
         #[test]
@@ -333,6 +345,42 @@ pub mod lsp {
                 .definition(&Location { line: 2, col: 9 })
                 .unwrap();
             assert_eq!(hello_def_loc, &Location { line: 1, col: 0 });
+        }
+
+        #[test]
+        fn test_nodiagnostics() {
+            let ebnf = "very_nice_stuff = hello;\nhello = \"world\";";
+            let lsp_context = super::LspContext::from_src(ebnf);
+            let diagnostics = lsp_context.diagnostics();
+            assert_eq!(diagnostics.len(), 0);
+        }
+
+        #[test]
+        fn test_unused() {
+            let ebnf = "hello = \"hello\";\nworld = hello;\ntest = hello;";
+            let lsp_context = super::LspContext::from_src(ebnf);
+            let diagnostics = lsp_context.diagnostics();
+            assert_eq!(diagnostics.len(), 2);
+            assert_eq!(diagnostics[0].message, "Unused definition: world");
+            assert_eq!(diagnostics[1].message, "Unused definition: test");
+        }
+
+        #[test]
+        fn test_undefined() {
+            let ebnf = "hello = world;";
+            let lsp_context = super::LspContext::from_src(ebnf);
+            let diagnostics = lsp_context.diagnostics();
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(diagnostics[0].message, "Undefined reference: world");
+        }
+
+        #[test]
+        fn test_root_rule() {
+            let ebnf = "hello = world;";
+            let lsp_context = super::LspContext::from_src(ebnf);
+            let root_rule = lsp_context.root_rule().unwrap();
+            assert_eq!(root_rule.0, Location { line: 0, col: 0 });
+            assert_eq!(root_rule.1, Location { line: 0, col: 5 });
         }
     }
 }
