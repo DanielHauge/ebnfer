@@ -18,6 +18,7 @@ pub mod lsp {
     #[derive(Debug)]
     pub struct LspContext {
         definitions: HashMap<String, Location>,
+        alternative_definitions: HashMap<String, Vec<Location>>,
         hover: HashMap<String, String>,
         references: HashMap<String, Vec<Location>>,
         offset_to_line: BTreeMap<usize, usize>, // Offset -> Line number
@@ -56,6 +57,7 @@ pub mod lsp {
 
             let mut lsp_context = Self {
                 definitions: HashMap::new(),
+                alternative_definitions: HashMap::new(),
                 hover: HashMap::new(),
                 references: HashMap::new(),
                 offset_to_line,
@@ -78,7 +80,15 @@ pub mod lsp {
             self.compute_symbols(parse_results);
             for rule in &parse_results.syntax.rules {
                 let loc = self.location_at_offset(rule.span.start);
-                self.definitions.insert(rule.name.to_string(), loc.clone());
+                let old_def = self.definitions.insert(rule.name.to_string(), loc.clone());
+                match old_def {
+                    Some(old_loc) => self
+                        .alternative_definitions
+                        .entry(rule.name.to_string())
+                        .or_insert_with(Vec::new)
+                        .push(old_loc),
+                    None => {}
+                }
                 let hover_span = rule.span.start..rule.span.end;
                 let hover_text = doc_content[hover_span].to_string();
                 self.hover.insert(rule.name.to_string(), hover_text);
@@ -190,13 +200,32 @@ pub mod lsp {
                         line: start.line,
                         col: start.col + k.len(),
                     };
-                    LspError {
+                    let other_defs: Vec<LspError> = self
+                        .alternative_definitions
+                        .get(k)
+                        .unwrap_or(&Vec::new())
+                        .iter()
+                        .map(|loc| LspError {
+                            message: format!("Unused definition: {}", k),
+                            start: loc.clone(),
+                            end: Location {
+                                line: loc.line,
+                                col: loc.col + k.len(),
+                            },
+                            error_type: LspErrorType::UnusedDefinition,
+                        })
+                        .collect();
+                    let main_def = LspError {
                         message: format!("Unused definition: {}", k),
                         start: start.clone(),
                         end,
                         error_type: LspErrorType::UnusedDefinition,
-                    }
-                });
+                    };
+                    let mut v = vec![main_def];
+                    v.extend(other_defs);
+                    v
+                })
+                .flatten();
 
             let undefined_refs: Vec<LspError> = self
                 .references
@@ -242,6 +271,11 @@ pub mod lsp {
             let offset = self.offset_at_location(location);
             let symbol = self.symbols.get(&offset)?;
             self.references.get(symbol.as_str()).map(|v| v.clone())
+        }
+
+        pub fn symbol(&self, location: &Location) -> Option<&str> {
+            let offset = self.offset_at_location(location);
+            self.symbols.get(&offset).map(|s| s.as_str())
         }
 
         pub fn definition(&self, location: &Location) -> Option<&Location> {

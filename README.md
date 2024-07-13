@@ -9,7 +9,7 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 
 - [x] Syntax error diagnostics
 - [x] Hover information
-- [ ] Multi definitions error
+- [ ] Multi definitions handling
 - [ ] References
 - [ ] Recursive hover information
 - [ ] Completion

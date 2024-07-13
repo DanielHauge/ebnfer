@@ -14,7 +14,7 @@ pub mod ipc {
     };
     use lsp_types::{
         Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
-        FullDocumentDiagnosticReport,
+        FullDocumentDiagnosticReport, ReferenceParams, Uri,
     };
     use lsp_types::{InitializeParams, ServerCapabilities};
 
@@ -50,6 +50,9 @@ pub mod ipc {
             document_formatting_provider: None,
             document_range_formatting_provider: None,
             document_on_type_formatting_provider: None,
+            code_action_provider: None,
+            document_symbol_provider: None,
+            semantic_tokens_provider: None,
             ..Default::default()
         })
         .unwrap();
@@ -105,9 +108,13 @@ pub mod ipc {
                             }
                         }
                         lsp_types::request::References::METHOD => {
-                            let (_id, _param): (RequestId, lsp_types::ReferenceParams) = req
+                            let (id, param): (RequestId, lsp_types::ReferenceParams) = req
                                 .extract(lsp_types::request::References::METHOD)
                                 .expect("Failed to cast");
+                            match references(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
                         }
                         lsp_types::request::DocumentDiagnosticRequest::METHOD => {
                             let (id, param): (RequestId, lsp_types::DocumentDiagnosticParams) = req
@@ -180,6 +187,28 @@ pub mod ipc {
         }
     }
 
+    trait FromWithUriLength<T> {
+        fn from_with_uri_length(t: T, uri: Uri, length: usize) -> Self;
+    }
+
+    impl FromWithUriLength<Location> for lsp_types::Location {
+        fn from_with_uri_length(loc: Location, t: Uri, length: usize) -> Self {
+            lsp_types::Location {
+                uri: t,
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: loc.line as u32,
+                        character: loc.col as u32,
+                    },
+                    end: lsp_types::Position {
+                        line: loc.line as u32,
+                        character: (loc.col + length) as u32,
+                    },
+                },
+            }
+        }
+    }
+
     impl Into<Diagnostic> for LspError {
         fn into(self) -> Diagnostic {
             let severity = match self.error_type {
@@ -214,6 +243,37 @@ pub mod ipc {
                 data: None,
             }
         }
+    }
+
+    fn references(
+        lsp_context: &HashMap<String, LspContext>,
+        id: RequestId,
+        params: ReferenceParams,
+    ) -> Result<Message, String> {
+        let uri = params.text_document_position.text_document.uri.to_string();
+        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let loc = crate::lsp::lsp::Location::from(params.text_document_position.position);
+        let refs = ctx.references(&loc).ok_or("No references found")?;
+        let symbol = ctx.symbol(&loc).ok_or("No symbol found")?;
+        let defs_len = symbol.len();
+        let ref_response: Vec<lsp_types::Location> = refs
+            .iter()
+            .map(|x| {
+                lsp_types::Location::from_with_uri_length(
+                    x.clone(),
+                    params.text_document_position.text_document.uri.clone(),
+                    defs_len,
+                )
+            })
+            .collect();
+        let json_result = serde_json::to_value(ref_response)
+            .ok()
+            .ok_or("Failed to serialize")?;
+        Ok(Message::Response(Response {
+            id,
+            result: Some(json_result),
+            error: None,
+        }))
     }
 
     fn diagnostics(
