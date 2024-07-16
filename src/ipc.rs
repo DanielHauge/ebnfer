@@ -12,6 +12,7 @@ pub mod ipc {
         HoverParams, HoverProviderCapability, LanguageString, MarkedString, OneOf, Position,
         TextDocumentSyncCapability, TextDocumentSyncKind,
     };
+    use lsp_types::{CompletionItem, Documentation};
     use lsp_types::{
         Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
         FullDocumentDiagnosticReport, ReferenceParams, SemanticToken, SemanticTokenModifier,
@@ -42,16 +43,24 @@ pub mod ipc {
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             references_provider: Some(OneOf::Left(true)),
             rename_provider: Some(OneOf::Left(true)),
-            completion_provider: None,
-            declaration_provider: None,
+            completion_provider: Some(lsp_types::CompletionOptions {
+                resolve_provider: Some(true),
+                trigger_characters: None,
+                all_commit_characters: None,
+                work_done_progress_options: Default::default(),
+                completion_item: Some(lsp_types::CompletionOptionsCompletionItem {
+                    label_details_support: Some(true),
+                }),
+            }),
+            declaration_provider: None, // No declarations, rules are always defined
             implementation_provider: None,
-            type_definition_provider: None,
+            type_definition_provider: None, // No types, only production rules
             // document_highlight_provider: Some(OneOf::Left(true)),
-            document_formatting_provider: None,
+            document_formatting_provider: Some(OneOf::Left(true)),
             document_range_formatting_provider: None,
             document_on_type_formatting_provider: None,
             code_action_provider: None,
-            document_symbol_provider: None,
+            document_symbol_provider: Some(OneOf::Left(true)),
             semantic_tokens_provider: Some(
                 lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
                     lsp_types::SemanticTokensOptions {
@@ -103,6 +112,7 @@ pub mod ipc {
     ) -> Result<(), Box<dyn Error + Sync + Send>> {
         let _params: InitializeParams = serde_json::from_value(params).unwrap();
         let mut lsp_context: HashMap<String, LspContext> = HashMap::new();
+        let mut parser_error: HashMap<String, Option<LspError>> = HashMap::new();
         for msg in &connection.receiver {
             match msg {
                 Message::Request(req) => {
@@ -133,18 +143,25 @@ pub mod ipc {
                             let (id, param): (RequestId, lsp_types::DocumentDiagnosticParams) = req
                                 .extract(lsp_types::request::DocumentDiagnosticRequest::METHOD)
                                 .expect("Failed to cast");
-                            match diagnostics(&lsp_context, id.clone(), param) {
+                            match diagnostics(&lsp_context, &parser_error, id.clone(), param) {
                                 Ok(x) => connection.sender.send(x).unwrap(),
                                 Err(e) => connection.sender.send(error(&e, id)).unwrap(),
                             }
-
-                            // let context = lsp_context.get(_param.text_document.uri.as_str())
                         }
                         lsp_types::request::SemanticTokensFullRequest::METHOD => {
                             let (id, param): (RequestId, lsp_types::SemanticTokensParams) = req
                                 .extract(lsp_types::request::SemanticTokensFullRequest::METHOD)
                                 .expect("Failed to cast");
                             match semantic_tokens(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
+                        }
+                        lsp_types::request::Completion::METHOD => {
+                            let (id, param): (RequestId, lsp_types::CompletionParams) = req
+                                .extract(lsp_types::request::Completion::METHOD)
+                                .expect("Failed to cast");
+                            match completion(&lsp_context, id.clone(), param) {
                                 Ok(x) => connection.sender.send(x).unwrap(),
                                 Err(e) => connection.sender.send(error(&e, id)).unwrap(),
                             }
@@ -165,20 +182,30 @@ pub mod ipc {
                             let params: DidOpenTextDocumentParams =
                                 not.extract(DidOpenTextDocument::METHOD).unwrap();
                             log_file(&format!("{params:?}"));
-                            lsp_context.insert(
-                                params.text_document.uri.to_string(),
-                                LspContext::from_src(&params.text_document.text),
-                            );
+                            let ctx = LspContext::from_src(&params.text_document.text);
+                            let p_error = ctx.syntax_error_to_lsp_error();
+                            if let Some(x) = p_error {
+                                parser_error
+                                    .insert(params.text_document.uri.to_string(), Some(x.clone()));
+                            } else {
+                                lsp_context.insert(params.text_document.uri.to_string(), ctx);
+                                parser_error.insert(params.text_document.uri.to_string(), None);
+                            }
                         }
                         notification::DidChangeTextDocument::METHOD => {
                             let params: lsp_types::DidChangeTextDocumentParams = not
                                 .extract(lsp_types::notification::DidChangeTextDocument::METHOD)
                                 .unwrap();
                             log_file(&format!("{params:?}"));
-                            lsp_context.insert(
-                                params.text_document.uri.to_string(),
-                                LspContext::from_src(&params.content_changes[0].text),
-                            );
+                            let ctx = LspContext::from_src(&params.content_changes[0].text);
+                            let p_error = ctx.syntax_error_to_lsp_error();
+                            if let Some(x) = p_error {
+                                parser_error
+                                    .insert(params.text_document.uri.to_string(), Some(x.clone()));
+                            } else {
+                                lsp_context.insert(params.text_document.uri.to_string(), ctx);
+                                parser_error.insert(params.text_document.uri.to_string(), None);
+                            }
                         }
                         _ => {}
                     }
@@ -293,6 +320,45 @@ pub mod ipc {
         }))
     }
 
+    fn completion(
+        lsp_context: &HashMap<String, LspContext>,
+        id: lsp_server::RequestId,
+        params: lsp_types::CompletionParams,
+    ) -> Result<Message, String> {
+        let uri = params.text_document_position.text_document.uri.to_string();
+        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+
+        let symbols = ctx
+            .symbols()
+            .into_iter()
+            .map(|x| {
+                let hover = ctx.hover_from_def(&x);
+                let mut item = CompletionItem::new_simple(x, "stuff".to_string());
+                if let Some(h) = hover {
+                    item.documentation = Some(Documentation::String(h.to_string()));
+                    // let detail = h.split("=").take(1).collect();
+                    let description = h.split("=").skip(1).take(1).collect();
+                    item.label_details = Some(lsp_types::CompletionItemLabelDetails {
+                        detail: None,
+                        description: Some(description),
+                    });
+                }
+                item.detail = Some("What".to_string());
+
+                item.kind = Some(lsp_types::CompletionItemKind::VARIABLE);
+
+                item
+            })
+            .collect::<Vec<_>>();
+        let resp = lsp_types::CompletionResponse::Array(symbols);
+        let json_result = serde_json::to_value(resp).expect("Failed to serialize");
+        Ok(Message::Response(Response {
+            id,
+            result: Some(json_result),
+            error: None,
+        }))
+    }
+
     fn references(
         lsp_context: &HashMap<String, LspContext>,
         id: RequestId,
@@ -304,7 +370,7 @@ pub mod ipc {
         let refs = ctx.references(&loc).ok_or("No references found")?;
         let symbol = ctx.symbol(&loc).ok_or("No symbol found")?;
         let defs_len = symbol.len();
-        let ref_response: Vec<lsp_types::Location> = refs
+        let mut ref_response: Vec<lsp_types::Location> = refs
             .iter()
             .map(|x| {
                 lsp_types::Location::from_with_uri_length(
@@ -314,6 +380,21 @@ pub mod ipc {
                 )
             })
             .collect();
+        if params.context.include_declaration {
+            let mut alt_defs = ctx.alternative_definitions(&loc);
+            alt_defs.push(ctx.definition(&loc).ok_or("No definition found")?.clone());
+            let lsp_locs = alt_defs
+                .iter()
+                .map(|x| {
+                    lsp_types::Location::from_with_uri_length(
+                        x.clone(),
+                        params.text_document_position.text_document.uri.clone(),
+                        defs_len,
+                    )
+                })
+                .collect::<Vec<_>>();
+            ref_response.extend(lsp_locs);
+        }
         let json_result = serde_json::to_value(ref_response)
             .ok()
             .ok_or("Failed to serialize")?;
@@ -326,12 +407,26 @@ pub mod ipc {
 
     fn diagnostics(
         lsp_context: &HashMap<String, LspContext>,
+        parser_error: &HashMap<String, Option<LspError>>,
         id: RequestId,
         params: DocumentDiagnosticParams,
     ) -> Result<Message, String> {
+        let p_error = parser_error
+            .get(params.text_document.uri.as_str())
+            .ok_or("document not found")?;
+        let e: Vec<Diagnostic> = match p_error {
+            None => vec![],
+            Some(x) => vec![x.clone().into()],
+        };
+
         let uri = params.text_document.uri.to_string();
         let ctx = lsp_context.get(&uri).ok_or("No document found")?;
-        let items = ctx.diagnostics().into_iter().map(|x| x.into()).collect();
+        let items = ctx
+            .diagnostics()
+            .into_iter()
+            .map(|x| x.into())
+            .chain(e)
+            .collect();
         let report = FullDocumentDiagnosticReport {
             items,
             result_id: None,

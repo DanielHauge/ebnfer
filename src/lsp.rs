@@ -146,7 +146,7 @@ pub mod lsp {
                 })
         }
 
-        pub fn location_at_offset(&self, offset: usize) -> Location {
+        fn location_at_offset(&self, offset: usize) -> Location {
             let line_offsets = self
                 .offset_to_line
                 .range((Included(0), Included(offset)))
@@ -166,7 +166,7 @@ pub mod lsp {
             }
         }
 
-        fn syntax_error_to_lsp_error(&self) -> Option<LspError> {
+        pub fn syntax_error_to_lsp_error(&self) -> Option<LspError> {
             match &self.syntax_error {
                 Some(x) => Some(LspError {
                     message: x.message.clone(),
@@ -233,11 +233,6 @@ pub mod lsp {
         }
 
         pub fn diagnostics(&self) -> Vec<LspError> {
-            let syntax_error = self.syntax_error_to_lsp_error();
-            if let Some(e) = syntax_error {
-                return vec![e];
-            }
-
             let unused_defs = self.unused_defs();
             let undefined_refs: Vec<LspError> = self
                 .references
@@ -275,6 +270,10 @@ pub mod lsp {
             diagnostics
         }
 
+        pub fn hover_from_def(&self, str: &str) -> Option<String> {
+            self.hover.get(str).map(|s| s.clone())
+        }
+
         pub fn hover(&self, location: &Location) -> Option<&str> {
             let offset = self.offset_at_location(location);
             let symbol = self.symbols.get(&offset)?;
@@ -292,17 +291,31 @@ pub mod lsp {
             self.symbols.get(&offset).map(|s| s.as_str())
         }
 
+        pub fn symbols(&self) -> Vec<String> {
+            self.definitions.keys().cloned().collect()
+        }
+
         pub fn definition(&self, location: &Location) -> Option<&Location> {
             let offset = self.offset_at_location(location);
             let symbol = self.symbols.get(&offset)?;
             self.definitions.get(symbol.as_str())
         }
+
+        pub fn alternative_definitions(&self, location: &Location) -> Vec<Location> {
+            let offset = self.offset_at_location(location);
+            let symbol = self.symbols.get(&offset).ok_or("No symbol found");
+            match symbol {
+                Ok(symbol) => self
+                    .alternative_definitions
+                    .get(symbol)
+                    .cloned()
+                    .unwrap_or(Vec::new()),
+                Err(_) => Vec::new(),
+            }
+        }
     }
 
     mod tests {
-        use ebnf_parser::ParseResult;
-
-        use crate::lsp::lsp::Location;
 
         #[test]
         fn test_hovers() {
@@ -313,7 +326,7 @@ pub mod lsp {
             let hover = lsp_context.hover.get("cool").unwrap();
             assert_eq!(hover, "cool = hello;");
 
-            let hover = lsp_context.hover(&Location { line: 2, col: 9 });
+            let hover = lsp_context.hover(&super::Location { line: 2, col: 9 });
             assert_eq!(hover, Some("hello = \"world\";"));
         }
 
@@ -324,15 +337,15 @@ pub mod lsp {
             let lsp_context = super::LspContext::from_src(ebnf);
             let refs = lsp_context.references.get("hello").unwrap();
             assert_eq!(refs.len(), 2);
-            assert_eq!(refs[0], Location { line: 0, col: 18 });
-            assert_eq!(refs[1], Location { line: 2, col: 7 });
+            assert_eq!(refs[0], super::Location { line: 0, col: 18 });
+            assert_eq!(refs[1], super::Location { line: 2, col: 7 });
 
             let refs = lsp_context
-                .references(&Location { line: 2, col: 10 })
+                .references(&super::Location { line: 2, col: 10 })
                 .expect("Should have refs");
             assert_eq!(refs.len(), 2);
-            assert_eq!(refs[0], Location { line: 0, col: 18 });
-            assert_eq!(refs[1], Location { line: 2, col: 7 });
+            assert_eq!(refs[0], super::Location { line: 0, col: 18 });
+            assert_eq!(refs[1], super::Location { line: 2, col: 7 });
         }
 
         #[test]
@@ -340,11 +353,11 @@ pub mod lsp {
             let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
             let lsp_context = super::LspContext::from_src(ebnf);
             let hello_def_loc = lsp_context.definitions.get("hello").unwrap();
-            assert_eq!(hello_def_loc, &Location { line: 1, col: 0 });
+            assert_eq!(hello_def_loc, &super::Location { line: 1, col: 0 });
             let hello_def_loc = lsp_context
-                .definition(&Location { line: 2, col: 9 })
+                .definition(&super::Location { line: 2, col: 9 })
                 .unwrap();
-            assert_eq!(hello_def_loc, &Location { line: 1, col: 0 });
+            assert_eq!(hello_def_loc, &super::Location { line: 1, col: 0 });
         }
 
         #[test]
@@ -379,8 +392,8 @@ pub mod lsp {
             let ebnf = "hello = world;";
             let lsp_context = super::LspContext::from_src(ebnf);
             let root_rule = lsp_context.root_rule().unwrap();
-            assert_eq!(root_rule.0, Location { line: 0, col: 0 });
-            assert_eq!(root_rule.1, Location { line: 0, col: 5 });
+            assert_eq!(root_rule.0, super::Location { line: 0, col: 0 });
+            assert_eq!(root_rule.1, super::Location { line: 0, col: 5 });
         }
     }
 }
