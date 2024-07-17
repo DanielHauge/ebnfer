@@ -11,15 +11,15 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [x] Hover information
 - [x] Multi definitions handling
 - [x] References
-- [ ] Completion
+- [x] Completion
+- [X] Semantic tokens Root rule
+- [ ] Document formatting
 - [ ] Multi definition hover information
 - [ ] Recursive hover information
 - [ ] Document symbols
-- [ ] Document formatting
 - [ ] go to definition
 - [ ] Rename
 - [ ] Declaration
 - [ ] Type definition
 - [ ] Code actions
-- [X] Semantic tokens Root rule
 - [ ] Workspace support - multiple files
