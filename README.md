@@ -13,12 +13,12 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [x] References
 - [x] Completion
 - [X] Semantic tokens Root rule
-- [ ] Document formatting
+- [x] Document formatting
+- [ ] Rename
 - [ ] Multi definition hover information
 - [ ] Recursive hover information
 - [ ] Document symbols
 - [ ] go to definition
-- [ ] Rename
 - [ ] Declaration
 - [ ] Type definition
 - [ ] Code actions

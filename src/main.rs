@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //         nom::Err::Failure(f) => panic!("Failure: {:?}", f),
     //     },
     // }
-    let _lol = lsp::lsp::LspContext::from_src(ebnf);
+    let _lol = lsp::lsp::LspContext::from_src(ebnf.to_string());
     println!("{:#?}", _lol);
     start()
 }

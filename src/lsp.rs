@@ -17,6 +17,7 @@ pub mod lsp {
 
     #[derive(Debug)]
     pub struct LspContext {
+        src: Option<String>,
         definitions: HashMap<String, Location>,
         alternative_definitions: HashMap<String, Vec<Location>>,
         hover: HashMap<String, String>,
@@ -43,7 +44,7 @@ pub mod lsp {
     }
 
     impl LspContext {
-        pub fn from_src(doc_content: &str) -> Self {
+        pub fn from_src(doc_content: String) -> Self {
             let mut offset_to_line = BTreeMap::new();
             let mut line_to_offset = HashMap::new();
             doc_content
@@ -56,6 +57,7 @@ pub mod lsp {
                 });
 
             let mut lsp_context = Self {
+                src: None,
                 definitions: HashMap::new(),
                 alternative_definitions: HashMap::new(),
                 hover: HashMap::new(),
@@ -66,13 +68,15 @@ pub mod lsp {
                 syntax_error: None,
             };
 
-            let lexer = ebnf_parser::Lexer::new(doc_content);
+            let lexer = ebnf_parser::Lexer::new(&doc_content);
             let parser = ebnf_parser::Parser::new(lexer);
             let parse_results = parser.parse();
+
             match parse_results {
-                Ok(x) => lsp_context.compute_lsp_context(doc_content, &x),
+                Ok(x) => lsp_context.compute_lsp_context(&doc_content, &x),
                 Err(e) => lsp_context.syntax_error = Some(e),
             }
+            lsp_context.src = Some(doc_content);
             lsp_context
         }
 
@@ -232,6 +236,20 @@ pub mod lsp {
             }
         }
 
+        pub fn format(&self) -> Option<String> {
+            let gg = ebnf_fmt::format_code(
+                self.src.as_ref()?,
+                &ebnf_fmt::Configuration {
+                    line_width: 4,
+                    ..Default::default()
+                },
+            );
+            match gg {
+                Ok(x) => Some(x),
+                Err(_) => None,
+            }
+        }
+
         pub fn diagnostics(&self) -> Vec<LspError> {
             let unused_defs = self.unused_defs();
             let undefined_refs: Vec<LspError> = self
@@ -320,7 +338,7 @@ pub mod lsp {
         #[test]
         fn test_hovers() {
             let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
-            let lsp_context = super::LspContext::from_src(ebnf);
+            let lsp_context = super::LspContext::from_src(ebnf.to_string());
             let hover = lsp_context.hover.get("hello").unwrap();
             assert_eq!(hover, "hello = \"world\";");
             let hover = lsp_context.hover.get("cool").unwrap();
@@ -334,7 +352,7 @@ pub mod lsp {
         fn test_refs() {
             let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
 
-            let lsp_context = super::LspContext::from_src(ebnf);
+            let lsp_context = super::LspContext::from_src(ebnf.to_string());
             let refs = lsp_context.references.get("hello").unwrap();
             assert_eq!(refs.len(), 2);
             assert_eq!(refs[0], super::Location { line: 0, col: 18 });
@@ -351,7 +369,7 @@ pub mod lsp {
         #[test]
         fn test_defs() {
             let ebnf = "very_nice_stuff = hello;\nhello = \"world\";\ncool = hello;";
-            let lsp_context = super::LspContext::from_src(ebnf);
+            let lsp_context = super::LspContext::from_src(ebnf.to_string());
             let hello_def_loc = lsp_context.definitions.get("hello").unwrap();
             assert_eq!(hello_def_loc, &super::Location { line: 1, col: 0 });
             let hello_def_loc = lsp_context
@@ -363,7 +381,7 @@ pub mod lsp {
         #[test]
         fn test_nodiagnostics() {
             let ebnf = "very_nice_stuff = hello;\nhello = \"world\";";
-            let lsp_context = super::LspContext::from_src(ebnf);
+            let lsp_context = super::LspContext::from_src(ebnf.to_string());
             let diagnostics = lsp_context.diagnostics();
             assert_eq!(diagnostics.len(), 0);
         }
@@ -371,7 +389,7 @@ pub mod lsp {
         #[test]
         fn test_unused() {
             let ebnf = "hello = \"hello\";\nworld = hello;\ntest = hello;";
-            let lsp_context = super::LspContext::from_src(ebnf);
+            let lsp_context = super::LspContext::from_src(ebnf.to_string());
             let diagnostics = lsp_context.diagnostics();
             assert_eq!(diagnostics.len(), 2);
             assert_eq!(diagnostics[0].message, "Unused definition: world");
@@ -381,7 +399,7 @@ pub mod lsp {
         #[test]
         fn test_undefined() {
             let ebnf = "hello = world;";
-            let lsp_context = super::LspContext::from_src(ebnf);
+            let lsp_context = super::LspContext::from_src(ebnf.to_string());
             let diagnostics = lsp_context.diagnostics();
             assert_eq!(diagnostics.len(), 1);
             assert_eq!(diagnostics[0].message, "Undefined reference: world");
@@ -390,7 +408,7 @@ pub mod lsp {
         #[test]
         fn test_root_rule() {
             let ebnf = "hello = world;";
-            let lsp_context = super::LspContext::from_src(ebnf);
+            let lsp_context = super::LspContext::from_src(ebnf.to_string());
             let root_rule = lsp_context.root_rule().unwrap();
             assert_eq!(root_rule.0, super::Location { line: 0, col: 0 });
             assert_eq!(root_rule.1, super::Location { line: 0, col: 5 });

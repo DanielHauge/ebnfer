@@ -166,6 +166,15 @@ pub mod ipc {
                                 Err(e) => connection.sender.send(error(&e, id)).unwrap(),
                             }
                         }
+                        lsp_types::request::Formatting::METHOD => {
+                            let (id, param): (RequestId, lsp_types::DocumentFormattingParams) = req
+                                .extract(lsp_types::request::Formatting::METHOD)
+                                .expect("Failed to cast");
+                            match format(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -182,7 +191,7 @@ pub mod ipc {
                             let params: DidOpenTextDocumentParams =
                                 not.extract(DidOpenTextDocument::METHOD).unwrap();
                             log_file(&format!("{params:?}"));
-                            let ctx = LspContext::from_src(&params.text_document.text);
+                            let ctx = LspContext::from_src(params.text_document.text);
                             let p_error = ctx.syntax_error_to_lsp_error();
                             if let Some(x) = p_error {
                                 parser_error
@@ -193,11 +202,12 @@ pub mod ipc {
                             }
                         }
                         notification::DidChangeTextDocument::METHOD => {
-                            let params: lsp_types::DidChangeTextDocumentParams = not
+                            let mut params: lsp_types::DidChangeTextDocumentParams = not
                                 .extract(lsp_types::notification::DidChangeTextDocument::METHOD)
                                 .unwrap();
                             log_file(&format!("{params:?}"));
-                            let ctx = LspContext::from_src(&params.content_changes[0].text);
+                            let first_change = params.content_changes.remove(0);
+                            let ctx = LspContext::from_src(first_change.text);
                             let p_error = ctx.syntax_error_to_lsp_error();
                             if let Some(x) = p_error {
                                 parser_error
@@ -318,6 +328,51 @@ pub mod ipc {
             result: Some(json_result),
             error: None,
         }))
+    }
+
+    fn format(
+        lsp_context: &HashMap<String, LspContext>,
+        id: RequestId,
+        params: lsp_types::DocumentFormattingParams,
+    ) -> Result<Message, String> {
+        let ctx = lsp_context
+            .get(&params.text_document.uri.to_string())
+            .ok_or("No document found")?;
+        let formatted = ctx.format();
+
+        match formatted {
+            None => Ok(Message::Response(Response {
+                id,
+                result: None,
+                error: Some(ResponseError {
+                    code: 1,
+                    message: "Failed to format".to_string(),
+                    data: None,
+                }),
+            })),
+            Some(x) => {
+                let resp: Vec<lsp_types::TextEdit> = vec![lsp_types::TextEdit {
+                    range: lsp_types::Range {
+                        start: lsp_types::Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: lsp_types::Position {
+                            line: 100000, // Who'd f*ck will ever format EBNF bigger than this?
+                            character: 100000,
+                        },
+                    },
+                    new_text: x,
+                }];
+                log_file(&format!("{resp:?}"));
+                let json_result = serde_json::to_value(resp).expect("Failed to serialize");
+                Ok(Message::Response(Response {
+                    id,
+                    result: Some(json_result),
+                    error: None,
+                }))
+            }
+        }
     }
 
     fn completion(
