@@ -14,7 +14,7 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [x] Completion
 - [X] Semantic tokens Root rule
 - [x] Document formatting
-- [ ] Rename
+- [x] Rename
 - [ ] Multi definition hover information
 - [ ] Recursive hover information
 - [ ] Document symbols

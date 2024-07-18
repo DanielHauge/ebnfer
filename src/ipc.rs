@@ -12,7 +12,7 @@ pub mod ipc {
         HoverParams, HoverProviderCapability, LanguageString, MarkedString, OneOf, Position,
         TextDocumentSyncCapability, TextDocumentSyncKind,
     };
-    use lsp_types::{CompletionItem, Documentation};
+    use lsp_types::{CompletionItem, Documentation, PrepareRenameResponse, WorkspaceEdit};
     use lsp_types::{
         Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
         FullDocumentDiagnosticReport, ReferenceParams, SemanticToken, SemanticTokenModifier,
@@ -42,7 +42,11 @@ pub mod ipc {
             definition_provider: Some(OneOf::Left(true)),
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             references_provider: Some(OneOf::Left(true)),
-            rename_provider: Some(OneOf::Left(true)),
+            // rename_provider: Some(OneOf::Left(true)),
+            rename_provider: Some(OneOf::Right(lsp_types::RenameOptions {
+                prepare_provider: Some(true),
+                work_done_progress_options: Default::default(),
+            })),
             completion_provider: Some(lsp_types::CompletionOptions {
                 resolve_provider: Some(true),
                 trigger_characters: None,
@@ -171,6 +175,24 @@ pub mod ipc {
                                 .extract(lsp_types::request::Formatting::METHOD)
                                 .expect("Failed to cast");
                             match format(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
+                        }
+                        lsp_types::request::Rename::METHOD => {
+                            let (id, param): (RequestId, lsp_types::RenameParams) = req
+                                .extract(lsp_types::request::Rename::METHOD)
+                                .expect("Failed to cast");
+                            match rename(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
+                        }
+                        lsp_types::request::PrepareRenameRequest::METHOD => {
+                            let (id, param): (RequestId, lsp_types::TextDocumentPositionParams) =
+                                req.extract(lsp_types::request::PrepareRenameRequest::METHOD)
+                                    .expect("Failed to cast");
+                            match rename_prepare(&lsp_context, id.clone(), param) {
                                 Ok(x) => connection.sender.send(x).unwrap(),
                                 Err(e) => connection.sender.send(error(&e, id)).unwrap(),
                             }
@@ -323,6 +345,82 @@ pub mod ipc {
             }],
         });
         let json_result = serde_json::to_value(result).expect("Failed to serialize");
+        Ok(Message::Response(Response {
+            id,
+            result: Some(json_result),
+            error: None,
+        }))
+    }
+
+    fn rename_prepare(
+        lsp_context: &HashMap<String, LspContext>,
+        id: RequestId,
+        params: lsp_types::TextDocumentPositionParams,
+    ) -> Result<Message, String> {
+        let uri = params.text_document.uri.to_string();
+        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let loc = crate::lsp::lsp::Location::from(params.position);
+        let result = match ctx.symbol(&loc) {
+            Some(_) => {
+                let resp = PrepareRenameResponse::DefaultBehavior {
+                    default_behavior: true,
+                };
+                let json_result = serde_json::to_value(resp).expect("Failed to serialize");
+                Some(json_result)
+            }
+            None => None,
+        };
+        Ok(Message::Response(Response {
+            id,
+            result,
+            error: None,
+        }))
+    }
+
+    fn rename(
+        lsp_context: &HashMap<String, LspContext>,
+        id: RequestId,
+        params: lsp_types::RenameParams,
+    ) -> Result<Message, String> {
+        let uri = params.text_document_position.text_document.uri.to_string();
+        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let loc = crate::lsp::lsp::Location::from(params.text_document_position.position);
+        let symbol_len = ctx.symbol(&loc).ok_or("No symbol found")?.len();
+        let main_def = ctx.definition(&loc).ok_or("No definition found")?;
+        let alt_defs = ctx.alternative_definitions(&loc);
+        let refs = ctx.references(&loc).map_or(vec![], |x| x);
+        let all_locs = alt_defs
+            .iter()
+            .chain(std::iter::once(main_def))
+            .chain(refs.iter());
+        let new_name = params.new_name;
+        let text_edits: Vec<lsp_types::TextEdit> = all_locs
+            .map(|x| lsp_types::TextEdit {
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: x.line as u32,
+                        character: x.col as u32,
+                    },
+                    end: lsp_types::Position {
+                        line: x.line as u32,
+                        character: (x.col + symbol_len) as u32,
+                    },
+                },
+                new_text: new_name.clone(),
+            })
+            .collect();
+
+        let mut edits: HashMap<Uri, Vec<lsp_types::TextEdit>> = HashMap::new();
+        edits.insert(
+            params.text_document_position.text_document.uri.clone(),
+            text_edits,
+        );
+        let resp = WorkspaceEdit {
+            changes: Some(edits),
+            document_changes: None,
+            change_annotations: None,
+        };
+        let json_result = serde_json::to_value(resp).expect("Failed to serialize");
         Ok(Message::Response(Response {
             id,
             result: Some(json_result),
