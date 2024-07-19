@@ -42,7 +42,6 @@ pub mod ipc {
             definition_provider: Some(OneOf::Left(true)),
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             references_provider: Some(OneOf::Left(true)),
-            // rename_provider: Some(OneOf::Left(true)),
             rename_provider: Some(OneOf::Right(lsp_types::RenameOptions {
                 prepare_provider: Some(true),
                 work_done_progress_options: Default::default(),
@@ -74,7 +73,6 @@ pub mod ipc {
                             token_modifiers: vec![SemanticTokenModifier::STATIC],
                         },
                         range: None,
-                        // full: None,
                         full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
                     },
                 ),
@@ -193,6 +191,15 @@ pub mod ipc {
                                 req.extract(lsp_types::request::PrepareRenameRequest::METHOD)
                                     .expect("Failed to cast");
                             match rename_prepare(&lsp_context, id.clone(), param) {
+                                Ok(x) => connection.sender.send(x).unwrap(),
+                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
+                            }
+                        }
+                        lsp_types::request::GotoDefinition::METHOD => {
+                            let (id, param): (RequestId, lsp_types::GotoDefinitionParams) = req
+                                .extract(lsp_types::request::GotoDefinition::METHOD)
+                                .expect("Failed to cast");
+                            match goto_definition(&lsp_context, id.clone(), param) {
                                 Ok(x) => connection.sender.send(x).unwrap(),
                                 Err(e) => connection.sender.send(error(&e, id)).unwrap(),
                             }
@@ -324,6 +331,40 @@ pub mod ipc {
                 data: None,
             }
         }
+    }
+
+    fn goto_definition(
+        lsp_context: &HashMap<String, LspContext>,
+        id: RequestId,
+        params: lsp_types::GotoDefinitionParams,
+    ) -> Result<Message, String> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let loc = crate::lsp::lsp::Location::from(params.text_document_position_params.position);
+        let def_length = ctx.symbol(&loc).ok_or("No symbol found")?.len();
+        let def_loc = ctx.definition(&loc).ok_or("No definition found")?;
+        let resp = lsp_types::GotoDefinitionResponse::Array(vec![
+            lsp_types::Location::from_with_uri_length(
+                def_loc.clone(),
+                params
+                    .text_document_position_params
+                    .text_document
+                    .uri
+                    .clone(),
+                def_length,
+            ),
+        ]);
+        let json_result = serde_json::to_value(resp).expect("Failed to serialize");
+        log_file(&format!("{json_result:?}"));
+        Ok(Message::Response(Response {
+            id,
+            result: Some(json_result),
+            error: None,
+        }))
     }
 
     fn semantic_tokens(

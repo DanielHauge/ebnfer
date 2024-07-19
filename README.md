@@ -15,11 +15,9 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [X] Semantic tokens Root rule
 - [x] Document formatting
 - [x] Rename
+- [x] Go to definition
 - [ ] Multi definition hover information
 - [ ] Recursive hover information
 - [ ] Document symbols
-- [ ] go to definition
-- [ ] Declaration
-- [ ] Type definition
 - [ ] Code actions
 - [ ] Workspace support - multiple files
