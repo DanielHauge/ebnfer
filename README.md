@@ -16,7 +16,7 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [x] Document formatting
 - [x] Rename
 - [x] Go to definition
-- [ ] Multi definition hover information
+- [x] Multi definition hover information
 - [ ] Recursive hover information
 - [ ] Document symbols
 - [ ] Code actions

@@ -21,6 +21,7 @@ pub mod lsp {
         definitions: HashMap<String, Location>,
         alternative_definitions: HashMap<String, Vec<Location>>,
         hover: HashMap<String, String>,
+        alternative_hover: HashMap<String, Vec<String>>,
         references: HashMap<String, Vec<Location>>,
         offset_to_line: BTreeMap<usize, usize>,
         line_to_offset: HashMap<usize, usize>,
@@ -65,6 +66,7 @@ pub mod lsp {
                 offset_to_line,
                 line_to_offset,
                 symbols: RangeMap::new(),
+                alternative_hover: HashMap::new(),
                 syntax_error: None,
             };
 
@@ -95,7 +97,15 @@ pub mod lsp {
                 }
                 let hover_span = rule.span.start..rule.span.end;
                 let hover_text = doc_content[hover_span].to_string();
-                self.hover.insert(rule.name.to_string(), hover_text);
+                let old_hover = self.hover.insert(rule.name.to_string(), hover_text);
+                match old_hover {
+                    Some(old_hover_text) => self
+                        .alternative_hover
+                        .entry(rule.name.to_string())
+                        .or_insert_with(Vec::new)
+                        .push(old_hover_text),
+                    None => {}
+                }
                 self.refs_from_definitions(&rule.definitions);
             }
         }
@@ -296,6 +306,19 @@ pub mod lsp {
             let offset = self.offset_at_location(location);
             let symbol = self.symbols.get(&offset)?;
             self.hover.get(symbol.as_str()).map(|s| s.as_str())
+        }
+
+        pub fn hover_alternatives(&self, location: &Location) -> Vec<String> {
+            let offset = self.offset_at_location(location);
+            let symbol = self.symbols.get(&offset).ok_or("No symbol found");
+            match symbol {
+                Ok(symbol) => self
+                    .alternative_hover
+                    .get(symbol)
+                    .cloned()
+                    .unwrap_or(Vec::new()),
+                Err(_) => Vec::new(),
+            }
         }
 
         pub fn references(&self, location: &Location) -> Option<Vec<Location>> {

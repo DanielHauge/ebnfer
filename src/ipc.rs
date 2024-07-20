@@ -658,14 +658,39 @@ pub mod ipc {
                 }))
             }
         };
-        let marked_string = MarkedString::LanguageString(LanguageString {
+        let main_hover_str = MarkedString::LanguageString(LanguageString {
             language: "ebnf".to_string(),
             value: hover.trim().to_string(),
         });
-        let result = Some(Hover {
-            range: None,
-            contents: lsp_types::HoverContents::Scalar(marked_string),
-        });
+
+        let mut alt_hovers_str = ctx
+            .hover_alternatives(&Location::from(
+                params.text_document_position_params.position,
+            ))
+            .into_iter()
+            .map(|x| {
+                MarkedString::LanguageString(LanguageString {
+                    language: "ebnf".to_string(),
+                    value: x.trim().to_string(),
+                })
+            })
+            .collect::<Vec<MarkedString>>();
+
+        let resp = match alt_hovers_str.len() {
+            0 => Hover {
+                range: None,
+                contents: lsp_types::HoverContents::Scalar(main_hover_str),
+            },
+            _ => {
+                alt_hovers_str.push(main_hover_str);
+                Hover {
+                    range: None,
+                    contents: lsp_types::HoverContents::Array(alt_hovers_str).into(),
+                }
+            }
+        };
+
+        let result = Some(resp);
         let json_result = serde_json::to_value(result).expect("Failed to serialize");
         Ok(Message::Response(Response {
             id,
