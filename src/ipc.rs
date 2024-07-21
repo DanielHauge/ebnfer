@@ -6,7 +6,10 @@ pub mod ipc {
     use std::error::Error;
 
     use lsp_types::notification::{self, DidOpenTextDocument, Notification};
-    use lsp_types::request::HoverRequest;
+    use lsp_types::request::{
+        Completion, DocumentDiagnosticRequest, Formatting, GotoDefinition, HoverRequest,
+        PrepareRenameRequest, References, Rename, SemanticTokensFullRequest,
+    };
     use lsp_types::{
         request::Request, DiagnosticServerCapabilities, DidOpenTextDocumentParams, Hover,
         HoverParams, HoverProviderCapability, LanguageString, MarkedString, OneOf, Position,
@@ -16,14 +19,15 @@ pub mod ipc {
     use lsp_types::{
         Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
         FullDocumentDiagnosticReport, ReferenceParams, SemanticToken, SemanticTokenModifier,
-        SemanticTokenType, SemanticTokensLegend, SemanticTokensParams, SemanticTokensResult, Uri,
+        SemanticTokenType, SemanticTokensLegend, SemanticTokensResult, Uri,
     };
     use lsp_types::{InitializeParams, ServerCapabilities};
 
     use lsp_server::{Connection, Message, RequestId, Response, ResponseError};
     use serde_json::Value;
 
-    use crate::lsp::lsp::{Location, LspContext, LspError};
+    use crate::lsp::lsp::AnalysisContext;
+    use crate::lsp::lsp::{Location, LspError};
     // https://github.com/rust-lang/rust-analyzer/blob/master/lib/lsp-server/examples/goto_def.rs
 
     pub fn start() -> Result<(), Box<dyn Error>> {
@@ -108,13 +112,22 @@ pub mod ipc {
         writeln!(file, "{}", msg).unwrap();
     }
 
+    // type alias: ctx = (HashMap<String, LspContext>, HashMap<String, Option<LspError>>)
+    struct LspContext {
+        lsp: HashMap<String, AnalysisContext>,
+        error: HashMap<String, Option<LspError>>,
+    }
+
     pub fn handle_conn(
         connection: Connection,
         params: Value,
     ) -> Result<(), Box<dyn Error + Sync + Send>> {
-        let _params: InitializeParams = serde_json::from_value(params).unwrap();
-        let mut lsp_context: HashMap<String, LspContext> = HashMap::new();
-        let mut parser_error: HashMap<String, Option<LspError>> = HashMap::new();
+        let _params: InitializeParams =
+            serde_json::from_value(params).or(Err("Failed to parse"))?;
+        let mut lsp_context = LspContext {
+            lsp: HashMap::new(),
+            error: HashMap::new(),
+        };
         for msg in &connection.receiver {
             match msg {
                 Message::Request(req) => {
@@ -123,87 +136,33 @@ pub mod ipc {
                     }
                     log_file(&format!("{req:?}"));
 
+                    let req_id = req.id.clone();
+
+                    let handle = |rqs,
+                                  func: fn(
+                        ctx: &LspContext,
+                        msg: Message,
+                    ) -> Result<Message, String>| {
+                        match func(&lsp_context, Message::Request(rqs)) {
+                            Ok(x) => connection.sender.send(x).or(Err("Failed to send")),
+                            Err(e) => connection
+                                .sender
+                                .send(error(&e, req_id))
+                                .or(Err("Failed to send")),
+                        }
+                    };
+
                     match req.method.as_str() {
-                        lsp_types::request::HoverRequest::METHOD => {
-                            let (id, param) =
-                                req.extract(HoverRequest::METHOD).expect("Cast failed");
-                            match hover(&lsp_context, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
-                        lsp_types::request::References::METHOD => {
-                            let (id, param): (RequestId, lsp_types::ReferenceParams) = req
-                                .extract(lsp_types::request::References::METHOD)
-                                .expect("Failed to cast");
-                            match references(&lsp_context, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
-                        lsp_types::request::DocumentDiagnosticRequest::METHOD => {
-                            let (id, param): (RequestId, lsp_types::DocumentDiagnosticParams) = req
-                                .extract(lsp_types::request::DocumentDiagnosticRequest::METHOD)
-                                .expect("Failed to cast");
-                            match diagnostics(&lsp_context, &parser_error, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
-                        lsp_types::request::SemanticTokensFullRequest::METHOD => {
-                            let (id, param): (RequestId, lsp_types::SemanticTokensParams) = req
-                                .extract(lsp_types::request::SemanticTokensFullRequest::METHOD)
-                                .expect("Failed to cast");
-                            match semantic_tokens(&lsp_context, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
-                        lsp_types::request::Completion::METHOD => {
-                            let (id, param): (RequestId, lsp_types::CompletionParams) = req
-                                .extract(lsp_types::request::Completion::METHOD)
-                                .expect("Failed to cast");
-                            match completion(&lsp_context, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
-                        lsp_types::request::Formatting::METHOD => {
-                            let (id, param): (RequestId, lsp_types::DocumentFormattingParams) = req
-                                .extract(lsp_types::request::Formatting::METHOD)
-                                .expect("Failed to cast");
-                            match format(&lsp_context, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
-                        lsp_types::request::Rename::METHOD => {
-                            let (id, param): (RequestId, lsp_types::RenameParams) = req
-                                .extract(lsp_types::request::Rename::METHOD)
-                                .expect("Failed to cast");
-                            match rename(&lsp_context, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
-                        lsp_types::request::PrepareRenameRequest::METHOD => {
-                            let (id, param): (RequestId, lsp_types::TextDocumentPositionParams) =
-                                req.extract(lsp_types::request::PrepareRenameRequest::METHOD)
-                                    .expect("Failed to cast");
-                            match rename_prepare(&lsp_context, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
-                        lsp_types::request::GotoDefinition::METHOD => {
-                            let (id, param): (RequestId, lsp_types::GotoDefinitionParams) = req
-                                .extract(lsp_types::request::GotoDefinition::METHOD)
-                                .expect("Failed to cast");
-                            match goto_definition(&lsp_context, id.clone(), param) {
-                                Ok(x) => connection.sender.send(x).unwrap(),
-                                Err(e) => connection.sender.send(error(&e, id)).unwrap(),
-                            }
-                        }
+                        HoverRequest::METHOD => handle(req, hover)?,
+                        References::METHOD => handle(req, references)?,
+                        DocumentDiagnosticRequest::METHOD => handle(req, diagnostics)?,
+                        SemanticTokensFullRequest::METHOD => handle(req, semantic_tokens)?,
+                        Completion::METHOD => handle(req, completion)?,
+                        Formatting::METHOD => handle(req, format)?,
+                        Rename::METHOD => handle(req, rename)?,
+                        PrepareRenameRequest::METHOD => handle(req, rename_prepare)?,
+                        GotoDefinition::METHOD => handle(req, goto_definition)?,
+
                         _ => {}
                     }
                 }
@@ -220,14 +179,19 @@ pub mod ipc {
                             let params: DidOpenTextDocumentParams =
                                 not.extract(DidOpenTextDocument::METHOD).unwrap();
                             log_file(&format!("{params:?}"));
-                            let ctx = LspContext::from_src(params.text_document.text);
+                            let ctx = AnalysisContext::from_src(params.text_document.text);
                             let p_error = ctx.syntax_error_to_lsp_error();
                             if let Some(x) = p_error {
-                                parser_error
+                                lsp_context
+                                    .error
                                     .insert(params.text_document.uri.to_string(), Some(x.clone()));
                             } else {
-                                lsp_context.insert(params.text_document.uri.to_string(), ctx);
-                                parser_error.insert(params.text_document.uri.to_string(), None);
+                                lsp_context
+                                    .lsp
+                                    .insert(params.text_document.uri.to_string(), ctx);
+                                lsp_context
+                                    .error
+                                    .insert(params.text_document.uri.to_string(), None);
                             }
                         }
                         notification::DidChangeTextDocument::METHOD => {
@@ -236,14 +200,19 @@ pub mod ipc {
                                 .unwrap();
                             log_file(&format!("{params:?}"));
                             let first_change = params.content_changes.remove(0);
-                            let ctx = LspContext::from_src(first_change.text);
+                            let ctx = AnalysisContext::from_src(first_change.text);
                             let p_error = ctx.syntax_error_to_lsp_error();
                             if let Some(x) = p_error {
-                                parser_error
+                                lsp_context
+                                    .error
                                     .insert(params.text_document.uri.to_string(), Some(x.clone()));
                             } else {
-                                lsp_context.insert(params.text_document.uri.to_string(), ctx);
-                                parser_error.insert(params.text_document.uri.to_string(), None);
+                                lsp_context
+                                    .lsp
+                                    .insert(params.text_document.uri.to_string(), ctx);
+                                lsp_context
+                                    .error
+                                    .insert(params.text_document.uri.to_string(), None);
                             }
                         }
                         _ => {}
@@ -333,17 +302,15 @@ pub mod ipc {
         }
     }
 
-    fn goto_definition(
-        lsp_context: &HashMap<String, LspContext>,
-        id: RequestId,
-        params: lsp_types::GotoDefinitionParams,
-    ) -> Result<Message, String> {
+    fn goto_definition(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, lsp_types::GotoDefinitionParams) =
+            extract_req(msg, GotoDefinition::METHOD);
         let uri = params
             .text_document_position_params
             .text_document
             .uri
             .to_string();
-        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
         let loc = crate::lsp::lsp::Location::from(params.text_document_position_params.position);
         let def_length = ctx.symbol(&loc).ok_or("No symbol found")?.len();
         let def_loc = ctx.definition(&loc).ok_or("No definition found")?;
@@ -367,13 +334,11 @@ pub mod ipc {
         }))
     }
 
-    fn semantic_tokens(
-        lsp_context: &HashMap<String, LspContext>,
-        id: RequestId,
-        params: SemanticTokensParams,
-    ) -> Result<Message, String> {
+    fn semantic_tokens(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, lsp_types::SemanticTokensParams) =
+            extract_req(msg, SemanticTokensFullRequest::METHOD);
         let uri = params.text_document.uri.to_string();
-        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
         let tokens = ctx.root_rule().ok_or("No root rule found")?;
         let result = SemanticTokensResult::Tokens(lsp_types::SemanticTokens {
             result_id: None,
@@ -393,13 +358,11 @@ pub mod ipc {
         }))
     }
 
-    fn rename_prepare(
-        lsp_context: &HashMap<String, LspContext>,
-        id: RequestId,
-        params: lsp_types::TextDocumentPositionParams,
-    ) -> Result<Message, String> {
+    fn rename_prepare(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, lsp_types::TextDocumentPositionParams) =
+            extract_req(msg, PrepareRenameRequest::METHOD);
         let uri = params.text_document.uri.to_string();
-        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
         let loc = crate::lsp::lsp::Location::from(params.position);
         let result = match ctx.symbol(&loc) {
             Some(_) => {
@@ -418,13 +381,10 @@ pub mod ipc {
         }))
     }
 
-    fn rename(
-        lsp_context: &HashMap<String, LspContext>,
-        id: RequestId,
-        params: lsp_types::RenameParams,
-    ) -> Result<Message, String> {
+    fn rename(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, lsp_types::RenameParams) = extract_req(msg, Rename::METHOD);
         let uri = params.text_document_position.text_document.uri.to_string();
-        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
         let loc = crate::lsp::lsp::Location::from(params.text_document_position.position);
         let symbol_len = ctx.symbol(&loc).ok_or("No symbol found")?.len();
         let main_def = ctx.definition(&loc).ok_or("No definition found")?;
@@ -469,12 +429,11 @@ pub mod ipc {
         }))
     }
 
-    fn format(
-        lsp_context: &HashMap<String, LspContext>,
-        id: RequestId,
-        params: lsp_types::DocumentFormattingParams,
-    ) -> Result<Message, String> {
+    fn format(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, lsp_types::DocumentFormattingParams) =
+            extract_req(msg, Formatting::METHOD);
         let ctx = lsp_context
+            .lsp
             .get(&params.text_document.uri.to_string())
             .ok_or("No document found")?;
         let formatted = ctx.format();
@@ -514,13 +473,11 @@ pub mod ipc {
         }
     }
 
-    fn completion(
-        lsp_context: &HashMap<String, LspContext>,
-        id: lsp_server::RequestId,
-        params: lsp_types::CompletionParams,
-    ) -> Result<Message, String> {
+    fn completion(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, lsp_types::CompletionParams) =
+            extract_req(msg, Completion::METHOD);
         let uri = params.text_document_position.text_document.uri.to_string();
-        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
 
         let symbols = ctx
             .symbols()
@@ -530,7 +487,6 @@ pub mod ipc {
                 let mut item = CompletionItem::new_simple(x, "stuff".to_string());
                 if let Some(h) = hover {
                     item.documentation = Some(Documentation::String(h.to_string()));
-                    // let detail = h.split("=").take(1).collect();
                     let description = h.split("=").skip(1).take(1).collect();
                     item.label_details = Some(lsp_types::CompletionItemLabelDetails {
                         detail: None,
@@ -553,13 +509,10 @@ pub mod ipc {
         }))
     }
 
-    fn references(
-        lsp_context: &HashMap<String, LspContext>,
-        id: RequestId,
-        params: ReferenceParams,
-    ) -> Result<Message, String> {
+    fn references(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, ReferenceParams) = extract_req(msg, References::METHOD);
         let uri = params.text_document_position.text_document.uri.to_string();
-        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
         let loc = crate::lsp::lsp::Location::from(params.text_document_position.position);
         let refs = ctx.references(&loc).ok_or("No references found")?;
         let symbol = ctx.symbol(&loc).ok_or("No symbol found")?;
@@ -599,13 +552,11 @@ pub mod ipc {
         }))
     }
 
-    fn diagnostics(
-        lsp_context: &HashMap<String, LspContext>,
-        parser_error: &HashMap<String, Option<LspError>>,
-        id: RequestId,
-        params: DocumentDiagnosticParams,
-    ) -> Result<Message, String> {
-        let p_error = parser_error
+    fn diagnostics(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, DocumentDiagnosticParams) =
+            extract_req(msg, DocumentDiagnosticRequest::METHOD);
+        let p_error = lsp_context
+            .error
             .get(params.text_document.uri.as_str())
             .ok_or("document not found")?;
         let e: Vec<Diagnostic> = match p_error {
@@ -614,7 +565,7 @@ pub mod ipc {
         };
 
         let uri = params.text_document.uri.to_string();
-        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
         let items = ctx
             .diagnostics()
             .into_iter()
@@ -633,18 +584,15 @@ pub mod ipc {
         }))
     }
 
-    fn hover(
-        lsp_context: &HashMap<String, LspContext>,
-        id: RequestId,
-        params: HoverParams,
-    ) -> Result<Message, String> {
+    fn hover(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, HoverParams) = extract_req(msg, HoverRequest::METHOD);
         let uri = params
             .text_document_position_params
             .text_document
             .uri
             .to_string();
 
-        let ctx = lsp_context.get(&uri).ok_or("No document found")?;
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
 
         let hover = match ctx.hover(&Location::from(
             params.text_document_position_params.position,
@@ -697,5 +645,30 @@ pub mod ipc {
             result: Some(json_result),
             error: None,
         }))
+    }
+
+    fn extract_req<T>(msg: Message, method: &str) -> (RequestId, T)
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let (id, params) = try_extract_req(msg, method).expect("Failed to cast");
+        (id, params)
+    }
+
+    fn try_extract_req<T>(msg: Message, method: &str) -> Option<(RequestId, T)>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        match msg {
+            Message::Request(req) => {
+                if req.method == method {
+                    let (id, params) = req.extract(method).expect("Failed to cast");
+                    Some((id, params))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 }
