@@ -413,7 +413,8 @@ pub mod lsp {
         fn test_unused() {
             let ebnf = "hello = \"hello\";\nworld = hello;\ntest = hello;";
             let lsp_context = super::AnalysisContext::from_src(ebnf.to_string());
-            let diagnostics = lsp_context.diagnostics();
+            let mut diagnostics = lsp_context.diagnostics();
+            diagnostics.sort_by(|a, b| a.start.line.cmp(&b.start.line));
             assert_eq!(diagnostics.len(), 2);
             assert_eq!(diagnostics[0].message, "Unused definition: world");
             assert_eq!(diagnostics[1].message, "Unused definition: test");
