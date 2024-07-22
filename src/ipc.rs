@@ -7,15 +7,18 @@ pub mod ipc {
 
     use lsp_types::notification::{self, DidOpenTextDocument, Notification};
     use lsp_types::request::{
-        Completion, DocumentDiagnosticRequest, Formatting, GotoDefinition, HoverRequest,
-        PrepareRenameRequest, References, Rename, SemanticTokensFullRequest,
+        Completion, DocumentDiagnosticRequest, DocumentSymbolRequest, Formatting, GotoDefinition,
+        HoverRequest, PrepareRenameRequest, References, Rename, SemanticTokensFullRequest,
     };
     use lsp_types::{
         request::Request, DiagnosticServerCapabilities, DidOpenTextDocumentParams, Hover,
         HoverParams, HoverProviderCapability, LanguageString, MarkedString, OneOf, Position,
         TextDocumentSyncCapability, TextDocumentSyncKind,
     };
-    use lsp_types::{CompletionItem, Documentation, PrepareRenameResponse, WorkspaceEdit};
+    use lsp_types::{
+        CompletionItem, DocumentSymbol, Documentation, PrepareRenameResponse, SymbolKind,
+        WorkspaceEdit,
+    };
     use lsp_types::{
         Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
         FullDocumentDiagnosticReport, ReferenceParams, SemanticToken, SemanticTokenModifier,
@@ -162,6 +165,7 @@ pub mod ipc {
                         Rename::METHOD => handle(req, rename)?,
                         PrepareRenameRequest::METHOD => handle(req, rename_prepare)?,
                         GotoDefinition::METHOD => handle(req, goto_definition)?,
+                        DocumentSymbolRequest::METHOD => handle(req, symbols)?,
 
                         _ => {}
                     }
@@ -334,6 +338,99 @@ pub mod ipc {
         }))
     }
 
+    fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+        let (id, params): (RequestId, lsp_types::DocumentSymbolParams) =
+            extract_req(msg, DocumentSymbolRequest::METHOD);
+        let uri = params.text_document.uri.to_string();
+        let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+        let symbols = ctx.symbols();
+        let symbol_infos: Vec<DocumentSymbol> = symbols
+            .into_iter()
+            .map(|x| {
+                #[allow(deprecated)] //Not using deprecated fields, will use tags if needed
+                DocumentSymbol {
+                    detail: None,
+                    kind: SymbolKind::FUNCTION,
+                    deprecated: None, //Deprecated, use tags
+                    tags: None,
+                    range: lsp_types::Range {
+                        start: lsp_types::Position {
+                            line: x.1.line as u32,
+                            character: x.1.col as u32,
+                        },
+                        end: lsp_types::Position {
+                            line: x.1.line as u32,
+                            character: x.1.col as u32 + x.0.len() as u32,
+                        },
+                    },
+                    selection_range: lsp_types::Range {
+                        start: lsp_types::Position {
+                            line: x.1.line as u32,
+                            character: x.1.col as u32,
+                        },
+                        end: lsp_types::Position {
+                            line: x.2.line as u32,
+                            character: x.2.col as u32,
+                        },
+                    },
+                    children: Some(
+                        ctx.alternative_definitions(&x.1)
+                            .into_iter()
+                            .map(|y| {
+                                let alternative_hovers = ctx.hover_alternatives(&y);
+                                let gg: Vec<DocumentSymbol> = alternative_hovers
+                                    .into_iter()
+                                    .map(|h| {
+                                        let hover_len = h.len();
+                                        DocumentSymbol {
+                                            deprecated: None, //Deprecated, use tags
+                                            detail: None,
+                                            kind: SymbolKind::FUNCTION,
+                                            name: x.0.clone(),
+                                            children: None,
+                                            tags: None,
+                                            range: lsp_types::Range {
+                                                start: lsp_types::Position {
+                                                    line: y.line as u32,
+                                                    character: y.col as u32,
+                                                },
+                                                end: lsp_types::Position {
+                                                    line: y.line as u32,
+                                                    character: y.col as u32 + x.0.len() as u32,
+                                                },
+                                            },
+                                            selection_range: lsp_types::Range {
+                                                start: lsp_types::Position {
+                                                    line: y.line as u32,
+                                                    character: y.col as u32,
+                                                },
+                                                end: lsp_types::Position {
+                                                    line: y.line as u32,
+                                                    character: y.col as u32 + hover_len as u32,
+                                                },
+                                            },
+                                        }
+                                    })
+                                    .collect();
+                                gg
+                            })
+                            .flatten()
+                            .collect(),
+                    ),
+                    name: x.0,
+                }
+            })
+            .collect();
+
+        let resp = lsp_types::DocumentSymbolResponse::Nested(symbol_infos);
+        let json_result = serde_json::to_value(resp).expect("Failed to serialize");
+        Ok(Message::Response(Response {
+            id,
+            result: Some(json_result),
+            error: None,
+        }))
+    }
+
     fn semantic_tokens(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
         let (id, params): (RequestId, lsp_types::SemanticTokensParams) =
             extract_req(msg, SemanticTokensFullRequest::METHOD);
@@ -483,8 +580,8 @@ pub mod ipc {
             .symbols()
             .into_iter()
             .map(|x| {
-                let hover = ctx.hover_from_def(&x);
-                let mut item = CompletionItem::new_simple(x, "stuff".to_string());
+                let hover = ctx.hover_from_def(&x.0);
+                let mut item = CompletionItem::new_simple(x.0, "stuff".to_string());
                 if let Some(h) = hover {
                     item.documentation = Some(Documentation::String(h.to_string()));
                     let description = h.split("=").skip(1).take(1).collect();

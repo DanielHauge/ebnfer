@@ -17,7 +17,7 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [x] Rename
 - [x] Go to definition
 - [x] Multi definition hover information
-- [ ] Document symbols
+- [x] Document symbols
 - [ ] Code actions : (Merge multi defs, rename unused def with underscore, add ignore rule)
 - [ ] Semantic token terminal byte
 - [ ] Workspace support - multiple files

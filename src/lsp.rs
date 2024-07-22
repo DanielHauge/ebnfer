@@ -332,8 +332,18 @@ pub mod lsp {
             self.symbols.get(&offset).map(|s| s.as_str())
         }
 
-        pub fn symbols(&self) -> Vec<String> {
-            self.definitions.keys().cloned().collect()
+        pub fn symbols(&self) -> Vec<(String, Location, Location)> {
+            self.definitions
+                .iter()
+                .map(|(k, v)| {
+                    let hover = self.hover.get(k).unwrap();
+                    let end = Location {
+                        line: v.line,
+                        col: v.col + hover.len(),
+                    };
+                    (k.clone(), v.clone(), end)
+                })
+                .collect()
         }
 
         pub fn definition(&self, location: &Location) -> Option<&Location> {
