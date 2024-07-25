@@ -91,7 +91,7 @@ pub mod lsp {
                     Some(old_loc) => self
                         .alternative_definitions
                         .entry(rule.name.to_string())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(old_loc),
                     None => {}
                 }
@@ -102,7 +102,7 @@ pub mod lsp {
                     Some(old_hover_text) => self
                         .alternative_hover
                         .entry(rule.name.to_string())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(old_hover_text),
                     None => {}
                 }
@@ -110,7 +110,7 @@ pub mod lsp {
             }
         }
 
-        fn refs_from_definitions<'src>(&mut self, definitions: &Vec<SingleDefinition<'src>>) {
+        fn refs_from_definitions(&mut self, definitions: &Vec<SingleDefinition<'_>>) {
             for def in definitions {
                 for term in &def.terms {
                     self.refs_from_syntatic_primary(&term.factor.primary);
@@ -124,19 +124,19 @@ pub mod lsp {
         fn refs_from_syntatic_primary(&mut self, primary: &ebnf_parser::ast::SyntacticPrimary) {
             match &primary.kind {
                 ebnf_parser::ast::SyntacticPrimaryKind::OptionalSequence(a) => {
-                    self.refs_from_definitions(&a)
+                    self.refs_from_definitions(a)
                 }
                 ebnf_parser::ast::SyntacticPrimaryKind::RepeatedSequence(r) => {
-                    self.refs_from_definitions(&r)
+                    self.refs_from_definitions(r)
                 }
                 ebnf_parser::ast::SyntacticPrimaryKind::GroupedSequence(g) => {
-                    self.refs_from_definitions(&g)
+                    self.refs_from_definitions(g)
                 }
                 ebnf_parser::ast::SyntacticPrimaryKind::MetaIdentifier(i) => {
                     let loc = self.location_at_offset(primary.span.start);
                     self.references
                         .entry(i.to_string())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(loc)
                 }
                 _ => {} // Do nothing for special sequences, terminals and empty
@@ -163,10 +163,7 @@ pub mod lsp {
         fn location_at_offset(&self, offset: usize) -> Location {
             let line_offsets = self
                 .offset_to_line
-                .range((Included(0), Included(offset)))
-                .into_iter()
-                .rev()
-                .next();
+                .range((Included(0), Included(offset))).next_back();
 
             match line_offsets {
                 Some((line_offset, line_number)) => Location {
@@ -181,15 +178,12 @@ pub mod lsp {
         }
 
         pub fn syntax_error_to_lsp_error(&self) -> Option<LspError> {
-            match &self.syntax_error {
-                Some(x) => Some(LspError {
+            self.syntax_error.as_ref().map(|x| LspError {
                     message: x.message.clone(),
                     start: self.location_at_offset(x.span.start),
                     end: self.location_at_offset(x.span.end),
                     error_type: LspErrorType::SyntaxError,
-                }),
-                None => None,
-            }
+                })
         }
 
         fn offset_at_location(&self, location: &Location) -> usize {
@@ -202,7 +196,7 @@ pub mod lsp {
             self.definitions
                 .keys()
                 .filter(|k| self.references.get(*k).is_none())
-                .map(|k| {
+                .flat_map(|k| {
                     let start = self.definitions.get(k).unwrap();
                     let end = Location {
                         line: start.line,
@@ -233,7 +227,6 @@ pub mod lsp {
                     v.extend(other_defs);
                     v
                 })
-                .flatten()
                 .collect()
         }
 
@@ -266,12 +259,12 @@ pub mod lsp {
                 .references
                 .keys()
                 .filter(|k| self.definitions.get(*k).is_none())
-                .map(|k| {
+                .flat_map(|k| {
                     let gg: Vec<LspError> = self
                         .references
                         .get(k)
                         .unwrap()
-                        .into_iter()
+                        .iter()
                         .map(|r| {
                             let end = Location {
                                 line: r.line,
@@ -287,7 +280,6 @@ pub mod lsp {
                         .collect();
                     gg
                 })
-                .flatten()
                 .collect();
 
             let mut diagnostics = Vec::new();
@@ -299,7 +291,7 @@ pub mod lsp {
         }
 
         pub fn hover_from_def(&self, str: &str) -> Option<String> {
-            self.hover.get(str).map(|s| s.clone())
+            self.hover.get(str).cloned()
         }
 
         pub fn hover(&self, location: &Location) -> Option<&str> {
@@ -324,7 +316,7 @@ pub mod lsp {
         pub fn references(&self, location: &Location) -> Option<Vec<Location>> {
             let offset = self.offset_at_location(location);
             let symbol = self.symbols.get(&offset)?;
-            self.references.get(symbol.as_str()).map(|v| v.clone())
+            self.references.get(symbol.as_str()).cloned()
         }
 
         pub fn symbol(&self, location: &Location) -> Option<&str> {

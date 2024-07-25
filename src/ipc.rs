@@ -35,10 +35,10 @@ pub mod ipc {
 
     pub fn start() -> Result<(), Box<dyn Error>> {
         log_file("Started");
-        eprint!("Starting LSP server\n");
+        eprintln!("Starting LSP server");
         let (connection, io_threads) = Connection::stdio();
 
-        let server_capabilities = serde_json::to_value(&ServerCapabilities {
+        let server_capabilities = serde_json::to_value(ServerCapabilities {
             diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                 work_done_progress_options: Default::default(),
                 identifier: None,
@@ -100,7 +100,7 @@ pub mod ipc {
         handle_conn(connection, initialization_params).unwrap();
         io_threads.join()?;
 
-        eprint!("LSP server stopped\n");
+        eprintln!("LSP server stopped");
         Ok(())
     }
 
@@ -270,14 +270,14 @@ pub mod ipc {
         }
     }
 
-    impl Into<Diagnostic> for LspError {
-        fn into(self) -> Diagnostic {
-            let severity = match self.error_type {
+    impl From<LspError> for Diagnostic {
+        fn from(val: LspError) -> Self {
+            let severity = match val.error_type {
                 crate::lsp::lsp::LspErrorType::SyntaxError => DiagnosticSeverity::ERROR,
                 crate::lsp::lsp::LspErrorType::UnusedDefinition => DiagnosticSeverity::WARNING,
                 crate::lsp::lsp::LspErrorType::UndefinedReference => DiagnosticSeverity::ERROR,
             };
-            let tags = match self.error_type {
+            let tags = match val.error_type {
                 crate::lsp::lsp::LspErrorType::UnusedDefinition => {
                     Some(vec![DiagnosticTag::UNNECESSARY])
                 }
@@ -286,18 +286,18 @@ pub mod ipc {
             Diagnostic {
                 range: lsp_types::Range {
                     start: lsp_types::Position {
-                        line: self.start.line as u32,
-                        character: self.start.col as u32,
+                        line: val.start.line as u32,
+                        character: val.start.col as u32,
                     },
                     end: lsp_types::Position {
-                        line: self.end.line as u32,
-                        character: self.end.col as u32,
+                        line: val.end.line as u32,
+                        character: val.end.col as u32,
                     },
                 },
                 severity: Some(severity),
                 code: None,
                 source: None,
-                message: self.message,
+                message: val.message,
                 related_information: None,
                 tags,
                 code_description: None,
@@ -376,7 +376,7 @@ pub mod ipc {
                     children: Some(
                         ctx.alternative_definitions(&x.1)
                             .into_iter()
-                            .map(|y| {
+                            .flat_map(|y| {
                                 let alternative_hovers = ctx.hover_alternatives(&y);
                                 let gg: Vec<DocumentSymbol> = alternative_hovers
                                     .into_iter()
@@ -414,7 +414,6 @@ pub mod ipc {
                                     .collect();
                                 gg
                             })
-                            .flatten()
                             .collect(),
                     ),
                     name: x.0,
@@ -584,7 +583,7 @@ pub mod ipc {
                 let mut item = CompletionItem::new_simple(x.0, "stuff".to_string());
                 if let Some(h) = hover {
                     item.documentation = Some(Documentation::String(h.to_string()));
-                    let description = h.split("=").skip(1).take(1).collect();
+                    let description = h.split('=').skip(1).take(1).collect();
                     item.label_details = Some(lsp_types::CompletionItemLabelDetails {
                         detail: None,
                         description: Some(description),
@@ -730,7 +729,7 @@ pub mod ipc {
                 alt_hovers_str.push(main_hover_str);
                 Hover {
                     range: None,
-                    contents: lsp_types::HoverContents::Array(alt_hovers_str).into(),
+                    contents: lsp_types::HoverContents::Array(alt_hovers_str),
                 }
             }
         };
