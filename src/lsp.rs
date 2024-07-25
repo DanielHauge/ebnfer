@@ -432,4 +432,39 @@ mod tests {
         assert_eq!(root_rule.0, super::Location { line: 0, col: 0 });
         assert_eq!(root_rule.1, super::Location { line: 0, col: 5 });
     }
+
+    #[test]
+    fn test_symbols() {
+        let ebnf = "hello = \"yo\";\nworld = \"yah\";";
+        let lsp_context = super::AnalysisContext::from_src(ebnf.to_string());
+        let mut symbols = lsp_context.symbols();
+        symbols.sort_by(|a, b| a.1.line.cmp(&b.1.line));
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0].0, "hello");
+        assert_eq!(symbols[0].1, super::Location { line: 0, col: 0 });
+        assert_eq!(symbols[0].2, super::Location { line: 0, col: 13 });
+        assert_eq!(symbols[1].0, "world");
+        assert_eq!(symbols[1].1, super::Location { line: 1, col: 0 });
+        assert_eq!(symbols[1].2, super::Location { line: 1, col: 14 });
+    }
+
+    #[test]
+    fn test_parsing_error_rule_termination() {
+        let ebnf = "hello = \"yo\";\nworld = \"yah\"";
+        let lsp_context = super::AnalysisContext::from_src(ebnf.to_string());
+        assert_eq!(
+            lsp_context.syntax_error_to_lsp_error().unwrap().message,
+            "Expected ';'"
+        );
+    }
+
+    #[test]
+    fn test_parsing_error_identifer_termination() {
+        let ebnf = "hello w = \"yo\";\nworld = \"yah\"";
+        let lsp_context = super::AnalysisContext::from_src(ebnf.to_string());
+        assert_eq!(
+            lsp_context.syntax_error_to_lsp_error().unwrap().message,
+            "Expected '=', was 'w'"
+        );
+    }
 }
