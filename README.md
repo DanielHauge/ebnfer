@@ -1,3 +1,5 @@
+![Test](https://github.com/DanielHauge/ebnf-lsp/actions/workflows/rust.yml/badge.svg)
+
 # EBNF Lsp
 
 ## Credits
