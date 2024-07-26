@@ -20,6 +20,6 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [x] Go to definition
 - [x] Multi definition hover information
 - [x] Document symbols
+- [x] supress unused diagnostics rule
 - [ ] Code actions : (Merge multi defs, rename unused def with underscore, add ignore rule)
-- [ ] Semantic token terminal byte
 - [ ] Workspace support - multiple files

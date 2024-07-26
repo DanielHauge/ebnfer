@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::Bound::Included;
 
@@ -26,6 +26,7 @@ pub struct AnalysisContext {
     line_to_offset: HashMap<usize, usize>,
     symbols: RangeMap<usize, String>,
     syntax_error: Option<SyntaxError>,
+    supress_unused_rule: HashSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,6 +59,7 @@ impl AnalysisContext {
 
         let mut lsp_context = Self {
             src: None,
+            supress_unused_rule: HashSet::new(),
             definitions: HashMap::new(),
             alternative_definitions: HashMap::new(),
             hover: HashMap::new(),
@@ -82,7 +84,7 @@ impl AnalysisContext {
     }
 
     fn compute_lsp_context(&mut self, doc_content: &str, parse_results: &ParseResult) {
-        self.compute_symbols(parse_results);
+        self.compute_symbols_comments(parse_results);
         for rule in &parse_results.syntax.rules {
             let loc = self.location_at_offset(rule.span.start);
             let old_def = self.definitions.insert(rule.name.to_string(), loc.clone());
@@ -135,21 +137,36 @@ impl AnalysisContext {
         }
     }
 
-    fn compute_symbols(&mut self, parse_results: &ParseResult) {
-        parse_results
-            .tokens
-            .iter()
-            .filter_map(|t| {
-                if let ebnf_parser::TokenKind::Identifier(x) = t.kind {
-                    Some((x, t.span))
-                } else {
-                    None
+    fn compute_symbols_comments(&mut self, parse_results: &ParseResult) {
+        let mut symbol_supress_rule_tree = BTreeSet::new();
+        for token in &parse_results.tokens {
+            let range = token.span.start..token.span.end;
+            match &token.kind {
+                ebnf_parser::TokenKind::Identifier(x) => {
+                    self.symbols.insert(range, x.to_string());
+                    symbol_supress_rule_tree.insert(token.span.start);
                 }
-            })
-            .for_each(|(x, span)| {
-                let range = span.start..span.end;
-                self.symbols.insert(range, x.to_string());
-            })
+                _ => continue,
+            };
+        }
+        parse_results
+            .comments
+            .values()
+            .flatten()
+            .for_each(|comment| {
+                if comment.text.contains("#[allow(unused)]") {
+                    symbol_supress_rule_tree
+                        .range((Included(comment.span.end), Included(usize::MAX)))
+                        .next()
+                        .map(|x| {
+                            self.symbols
+                                .get(x)
+                                .expect("Symbol should exist as it was found in btree")
+                                .clone()
+                        })
+                        .map(|x| self.supress_unused_rule.insert(x));
+                }
+            });
     }
 
     fn location_at_offset(&self, offset: usize) -> Location {
@@ -190,6 +207,9 @@ impl AnalysisContext {
             .keys()
             .filter(|k| !self.references.contains_key(*k))
             .flat_map(|k| {
+                if self.supress_unused_rule.contains(k) {
+                    return vec![];
+                }
                 let start = self.definitions.get(k).unwrap();
                 let end = Location {
                     line: start.line,
@@ -466,5 +486,23 @@ mod tests {
             lsp_context.syntax_error_to_lsp_error().unwrap().message,
             "Expected '=', was 'w'"
         );
+    }
+
+    #[test]
+    fn test_supress_unused() {
+        let ebnf = "hello = \"hello\"; (* #[allow(unused)] *)\nworld = hello;";
+        let lsp_context = super::AnalysisContext::from_src(ebnf.to_string());
+
+        assert_eq!(lsp_context.supress_unused_rule.len(), 1);
+        assert_eq!(lsp_context.supress_unused_rule.contains("world"), true);
+    }
+
+    #[test]
+    fn test_unused_w_rule() {
+        let ebnf = "hello = \"hello\";\n(* #[allow(unused)] *)\nworld = hello;\ntest = hello;";
+        let lsp_context = super::AnalysisContext::from_src(ebnf.to_string());
+        let mut diagnostics = lsp_context.diagnostics();
+        diagnostics.sort_by(|a, b| a.start.line.cmp(&b.start.line));
+        assert_eq!(diagnostics.len(), 0);
     }
 }
