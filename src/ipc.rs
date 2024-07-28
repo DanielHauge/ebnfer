@@ -2,10 +2,12 @@
 
 use std::{collections::HashMap, error::Error};
 
+use ebnf_fmt::configuration::NewlineKind;
 use lsp_types::notification::{self, DidOpenTextDocument, Notification};
 use lsp_types::request::{
-    Completion, DocumentDiagnosticRequest, DocumentSymbolRequest, Formatting, GotoDefinition,
-    HoverRequest, PrepareRenameRequest, References, Rename, SemanticTokensFullRequest,
+    CodeActionRequest, Completion, DocumentDiagnosticRequest, DocumentSymbolRequest, Formatting,
+    GotoDefinition, HoverRequest, PrepareRenameRequest, References, Rename,
+    SemanticTokensFullRequest,
 };
 use lsp_types::{
     request::Request, DiagnosticServerCapabilities, DidOpenTextDocumentParams, Hover, HoverParams,
@@ -13,7 +15,8 @@ use lsp_types::{
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use lsp_types::{
-    CompletionItem, DocumentSymbol, Documentation, PrepareRenameResponse, SymbolKind, WorkspaceEdit,
+    CodeAction, CodeActionProviderCapability, CodeActionResponse, CompletionItem, DocumentSymbol,
+    Documentation, PrepareRenameResponse, Range, SymbolKind, WorkspaceEdit,
 };
 use lsp_types::{
     Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
@@ -25,7 +28,7 @@ use lsp_types::{InitializeParams, ServerCapabilities};
 use lsp_server::{Connection, Message, RequestId, Response, ResponseError};
 use serde_json::Value;
 
-use crate::lsp::AnalysisContext;
+use crate::lsp::{AnalysisContext, SUPRESS_UNUSED_DEF, UNUSED_DEF_FMT};
 use crate::lsp::{Location, LspError};
 // https://github.com/rust-lang/rust-analyzer/blob/master/lib/lsp-server/examples/goto_def.rs
 
@@ -65,7 +68,7 @@ pub fn start() -> Result<(), Box<dyn Error>> {
         document_formatting_provider: Some(OneOf::Left(true)),
         document_range_formatting_provider: None,
         document_on_type_formatting_provider: None,
-        code_action_provider: None,
+        code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         semantic_tokens_provider: Some(
             lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -158,7 +161,7 @@ pub fn handle_conn(
                     PrepareRenameRequest::METHOD => handle(req, rename_prepare)?,
                     GotoDefinition::METHOD => handle(req, goto_definition)?,
                     DocumentSymbolRequest::METHOD => handle(req, symbols)?,
-
+                    CodeActionRequest::METHOD => handle(req, code_actions)?,
                     _ => {}
                 }
             }
@@ -367,7 +370,7 @@ fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
                         .into_iter()
                         .flat_map(|y| {
                             let alternative_hovers = ctx.hover_alternatives(&y);
-                            let gg: Vec<DocumentSymbol> = alternative_hovers
+                            let doc_symbols: Vec<DocumentSymbol> = alternative_hovers
                                 .into_iter()
                                 .map(|h| {
                                     let hover_len = h.len();
@@ -401,7 +404,7 @@ fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
                                     }
                                 })
                                 .collect();
-                            gg
+                            doc_symbols
                         })
                         .collect(),
                 ),
@@ -412,6 +415,60 @@ fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
 
     let resp = lsp_types::DocumentSymbolResponse::Nested(symbol_infos);
     let json_result = serde_json::to_value(resp).expect("Failed to serialize");
+    Ok(Message::Response(Response {
+        id,
+        result: Some(json_result),
+        error: None,
+    }))
+}
+
+fn code_actions(_lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
+    let (id, params): (RequestId, lsp_types::CodeActionParams) =
+        extract_req(msg, lsp_types::request::CodeActionRequest::METHOD);
+
+    let mut result: CodeActionResponse = vec![];
+
+    let unused_def_diag = params
+        .context
+        .diagnostics
+        .into_iter()
+        .find(|x| x.message.starts_with(UNUSED_DEF_FMT));
+
+    if let Some(x) = unused_def_diag {
+        let loc = Location::from(x.range.start);
+        let mut changes: HashMap<Uri, Vec<lsp_types::TextEdit>> = HashMap::new();
+        let p = Position {
+            line: loc.line as u32,
+            character: loc.col as u32,
+        };
+        let range = Range { start: p, end: p };
+        changes.insert(
+            params.text_document.uri.clone(),
+            vec![lsp_types::TextEdit {
+                range: range,
+                new_text: format!("(* {} *)\n", SUPRESS_UNUSED_DEF),
+            }],
+        );
+        let add_supress_rule_action = CodeAction {
+            data: None,
+            title: format!("Suppress rule → {}", x.message),
+            diagnostics: Some(vec![x]),
+            kind: Some(lsp_types::CodeActionKind::QUICKFIX),
+            edit: Some(WorkspaceEdit {
+                changes: Some(changes),
+                document_changes: None,
+                change_annotations: None,
+            }),
+            command: None,
+            is_preferred: None,
+            disabled: None,
+        };
+        result.push(lsp_types::CodeActionOrCommand::CodeAction(
+            add_supress_rule_action,
+        ));
+    }
+
+    let json_result = serde_json::to_value(result).expect("Failed to serialize");
     Ok(Message::Response(Response {
         id,
         result: Some(json_result),

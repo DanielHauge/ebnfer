@@ -44,6 +44,10 @@ pub struct LspError {
     pub error_type: LspErrorType,
 }
 
+// Define constant error start message
+pub const UNUSED_DEF_FMT: &str = "Unused definition: ";
+pub const SUPRESS_UNUSED_DEF: &str = "#[allow(unused)]";
+
 impl AnalysisContext {
     pub fn from_src(doc_content: String) -> Self {
         let mut offset_to_line = BTreeMap::new();
@@ -154,7 +158,7 @@ impl AnalysisContext {
             .values()
             .flatten()
             .for_each(|comment| {
-                if comment.text.contains("#[allow(unused)]") {
+                if comment.text.contains(SUPRESS_UNUSED_DEF) {
                     symbol_supress_rule_tree
                         .range((Included(comment.span.end), Included(usize::MAX)))
                         .next()
@@ -221,7 +225,7 @@ impl AnalysisContext {
                     .unwrap_or(&Vec::new())
                     .iter()
                     .map(|loc| LspError {
-                        message: format!("Unused definition: {}", k),
+                        message: format!("{}{}", UNUSED_DEF_FMT, k),
                         start: loc.clone(),
                         end: Location {
                             line: loc.line,
@@ -231,7 +235,7 @@ impl AnalysisContext {
                     })
                     .collect();
                 let main_def = LspError {
-                    message: format!("Unused definition: {}", k),
+                    message: format!("{}{}", UNUSED_DEF_FMT, k),
                     start: start.clone(),
                     end,
                     error_type: LspErrorType::UnusedDefinition,
