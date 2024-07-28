@@ -2,11 +2,6 @@
 
 # EBNF Lsp
 
-## Credits
-
-Inspired by: <https://github.com/chaosunity/ebnf>
-And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
-
 ## Features
 
 - [x] Syntax error diagnostics
@@ -22,4 +17,8 @@ And: <https://www.youtube.com/watch?v=YsdlcQoHqPY&t=348s>
 - [x] Document symbols
 - [x] supress unused diagnostics rule
 - [ ] Code actions : (Merge multi defs, rename unused def with underscore, add ignore rule)
+- [ ] General document highlighting
+
+## Roadmap features
+
 - [ ] Workspace support - multiple files
