@@ -16,7 +16,7 @@
 - [x] Multi definition hover information
 - [x] Document symbols
 - [x] supress unused diagnostics rule
-- [ ] Code actions : (Merge multi defs, rename unused def with underscore, add ignore rule)
+- [x] Code actions
 - [ ] General document highlighting
 
 ## Roadmap features
