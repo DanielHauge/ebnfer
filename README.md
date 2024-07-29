@@ -17,6 +17,7 @@ An implementation of the language server protocol (LSP) for EBNF grammars.
 - [x] Go to definition
 - [x] Document symbols
 - [x] Code actions (supress unused warning)
+- [x] Formatting
 
 <https://github.com/user-attachments/assets/f084e652-b4f3-4f9c-a8e5-1cce6fb85e06>
 
