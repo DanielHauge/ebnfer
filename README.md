@@ -1,4 +1,5 @@
 ![Test](https://github.com/DanielHauge/ebnf-lsp/actions/workflows/rust.yml/badge.svg)
+![crates.io](https://img.shields.io/crates/v/ebnfer.svg)
 
 # EBNFER
 
@@ -17,11 +18,7 @@ An implementation of the language server protocol (LSP) for EBNF grammars.
 - [x] Document symbols
 - [x] Code actions (supress unused warning)
 
-
-
-https://github.com/user-attachments/assets/f084e652-b4f3-4f9c-a8e5-1cce6fb85e06
-
-
+<https://github.com/user-attachments/assets/f084e652-b4f3-4f9c-a8e5-1cce6fb85e06>
 
 ## Installation
 
