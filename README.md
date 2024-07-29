@@ -28,6 +28,37 @@ Build from source or install via cargo:
 cargo install ebnfer
 ```
 
+### Use w. Neovim (0.10.0)
+
+Add ebnf as file type by adding the following to config: (`init.lua` fx.)
+
+```lua
+vim.filetype.add {
+    extension = {
+        ebnf = "ebnf",
+    },
+}
+```
+
+Add lsp attach with the following lua (N.B: cmd should have `.exe` suffix on windows):
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+    pattern = "ebnf",
+    callback = function()
+        vim.lsp.buf_attach_client(
+            0,
+            vim.lsp.start_client {
+                name = "ebnfer",
+                cmd = { "ebnfer" },
+                on_attach = on_attach,
+                capabilities = capabilities,
+            }
+        )
+    end,
+})
+```
+
 ## Further development
 
 - [ ] Vs Code extension - w. general document highlighting
