@@ -1,7 +1,13 @@
 [package]
-name = "ebnf-lsp"
+name = "ebnfer"
 version = "0.1.0"
 edition = "2021"
+authors = ["Daniel <animcuil@gmail.com>"]
+description = "A LSP implementation for EBNF."
+readme = "README.md"
+repository = "https://github.com/DanielHauge/ebnfer"
+license = "MIT"
+
 
 [dependencies]
 nom = "7.1.3"

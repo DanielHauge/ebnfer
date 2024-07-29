@@ -1,3 +1,56 @@
-World = "World!";
-Hello = "Hello";
-Hello_There = Hello , ' ' , World;
+Program   = { Statement } ;
+Statement = { Assignment
+            | IfStatement
+            | WhileStatement
+            | PrintStatement
+            | BlockStatement } ;
+
+Assignment  = Identifier
+            , '='
+            , ExpressionTwo
+            , ';' ;
+IfStatement = 'if'
+            , ExpressionTwo
+            , BlockStatement
+            , [ 'else'
+              , BlockStatement ] ;
+
+(* #[allow(unused)] *)
+Unused = 'Hello' ;
+
+WhileStatement = 'while'
+               , ExpressionTwo
+               , BlockStatement ;
+
+PrintStatement = 'print'
+               , ExpressionTwo
+               , ';' ;
+
+BlockStatement = '{'
+               , { Statement }
+               , '}' ;
+
+Identifier = [ 'a' - 'z'
+             | 'A' - 'Z' ]
+           , { [ 'a' - 'z'
+               | 'A' - 'Z'
+               | '0' - '9' ] } ;
+
+(* #[allow(unused)] *)
+NotUsed = 'Hello' ;
+
+ExpressionTwo = Term
+              | ExpressionTwo
+              , '+'
+              , Term ;
+Term          = Factor
+              | Term
+              , '*'
+              , Factor ;
+Factor        = Identifier
+              | Number
+              | '('
+              , ExpressionTwo
+              , ')' ;
+Number        = [ '0' - '9' ]
+              , { [ '0' - '9' ] } ;

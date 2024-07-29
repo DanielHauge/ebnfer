@@ -2,7 +2,6 @@
 
 use std::{collections::HashMap, error::Error};
 
-use ebnf_fmt::configuration::NewlineKind;
 use lsp_types::notification::{self, DidOpenTextDocument, Notification};
 use lsp_types::request::{
     CodeActionRequest, Completion, DocumentDiagnosticRequest, DocumentSymbolRequest, Formatting,
@@ -103,6 +102,7 @@ pub fn start() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[cfg(debug_assertions)]
 fn log_file(msg: &str) {
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -113,6 +113,9 @@ fn log_file(msg: &str) {
         .unwrap();
     writeln!(file, "{}", msg).unwrap();
 }
+
+#[cfg(not(debug_assertions))]
+fn log_file(_msg: &str) {}
 
 // type alias: ctx = (HashMap<String, LspContext>, HashMap<String, Option<LspError>>)
 struct LspContext {

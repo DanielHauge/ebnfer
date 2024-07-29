@@ -1,24 +1,36 @@
 ![Test](https://github.com/DanielHauge/ebnf-lsp/actions/workflows/rust.yml/badge.svg)
 
-# EBNF Lsp
+# EBNFER
+
+An implementation of the language server protocol (LSP) for EBNF grammars.
 
 ## Features
 
-- [x] Syntax error diagnostics
-- [x] Hover information
-- [x] Multi definitions handling
+- [X] Semantic tokens (Root rule)
+- [x] Diagnostics
+- [x] Hover
 - [x] References
 - [x] Completion
-- [X] Semantic tokens Root rule
 - [x] Document formatting
 - [x] Rename
 - [x] Go to definition
-- [x] Multi definition hover information
 - [x] Document symbols
-- [x] supress unused diagnostics rule
-- [x] Code actions
-- [ ] General document highlighting
+- [x] Code actions (supress unused warning)
 
-## Roadmap features
+## Installation
 
+Build from source or install via cargo:
+
+```bash
+cargo install ebnfer
+```
+
+## Further development
+
+- [ ] Vs Code extension - w. general document highlighting
 - [ ] Workspace support - multiple files
+
+## Inspired
+
+This project is inspired by the ebnf analysis crate on crates.io - [ebnf](https://github.com/RubixDev/ebnf).
+Also inspired by the following youtube video: [Learn By Building: Language Server Protocol - TJ Devries](https://www.youtube.com/watch?v=YsdlcQoHqPY).
