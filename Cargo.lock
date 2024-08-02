@@ -33,7 +33,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "ebnf-lsp"
+name = "ebnf-parser"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d4e45d1af907b82fc7b41782c50bc0b8efa0d7d719896f5cbf665ca7c4f9564"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "ebnfer"
 version = "0.1.0"
 dependencies = [
  "ebnf-fmt",
@@ -45,15 +54,6 @@ dependencies = [
  "rangemap",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "ebnf-parser"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d4e45d1af907b82fc7b41782c50bc0b8efa0d7d719896f5cbf665ca7c4f9564"
-dependencies = [
- "thiserror",
 ]
 
 [[package]]

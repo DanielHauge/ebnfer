@@ -310,7 +310,10 @@ fn goto_definition(lsp_context: &LspContext, msg: Message) -> Result<Message, St
         .text_document
         .uri
         .to_string();
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+    let ctx = lsp_context
+        .lsp
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
     let loc = crate::lsp::Location::from(params.text_document_position_params.position);
     let def_length = ctx.symbol(&loc).ok_or("No symbol found")?.len();
     let def_loc = ctx.definition(&loc).ok_or("No definition found")?;
@@ -337,7 +340,10 @@ fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
     let (id, params): (RequestId, lsp_types::DocumentSymbolParams) =
         extract_req(msg, DocumentSymbolRequest::METHOD);
     let uri = params.text_document.uri.to_string();
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+    let ctx = lsp_context
+        .lsp
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
     let symbols = ctx.symbols();
     let symbol_infos: Vec<DocumentSymbol> = symbols
         .into_iter()
@@ -483,7 +489,10 @@ fn semantic_tokens(lsp_context: &LspContext, msg: Message) -> Result<Message, St
     let (id, params): (RequestId, lsp_types::SemanticTokensParams) =
         extract_req(msg, SemanticTokensFullRequest::METHOD);
     let uri = params.text_document.uri.to_string();
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+    let ctx = lsp_context
+        .lsp
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
     let tokens = ctx.root_rule().ok_or("No root rule found")?;
     let result = SemanticTokensResult::Tokens(lsp_types::SemanticTokens {
         result_id: None,
@@ -507,7 +516,10 @@ fn rename_prepare(lsp_context: &LspContext, msg: Message) -> Result<Message, Str
     let (id, params): (RequestId, lsp_types::TextDocumentPositionParams) =
         extract_req(msg, PrepareRenameRequest::METHOD);
     let uri = params.text_document.uri.to_string();
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+    let ctx = lsp_context
+        .lsp
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
     let loc = crate::lsp::Location::from(params.position);
     let result = match ctx.symbol(&loc) {
         Some(_) => {
@@ -529,7 +541,10 @@ fn rename_prepare(lsp_context: &LspContext, msg: Message) -> Result<Message, Str
 fn rename(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
     let (id, params): (RequestId, lsp_types::RenameParams) = extract_req(msg, Rename::METHOD);
     let uri = params.text_document_position.text_document.uri.to_string();
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+    let ctx = lsp_context
+        .lsp
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
     let loc = crate::lsp::Location::from(params.text_document_position.position);
     let symbol_len = ctx.symbol(&loc).ok_or("No symbol found")?.len();
     let main_def = ctx.definition(&loc).ok_or("No definition found")?;
@@ -578,10 +593,11 @@ fn rename(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
 fn format(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
     let (id, params): (RequestId, lsp_types::DocumentFormattingParams) =
         extract_req(msg, Formatting::METHOD);
+    let uri = params.text_document.uri.to_string();
     let ctx = lsp_context
         .lsp
-        .get(&params.text_document.uri.to_string())
-        .ok_or("No document found")?;
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
     let formatted = ctx.format();
 
     match formatted {
@@ -623,7 +639,10 @@ fn completion(lsp_context: &LspContext, msg: Message) -> Result<Message, String>
     let (id, params): (RequestId, lsp_types::CompletionParams) =
         extract_req(msg, Completion::METHOD);
     let uri = params.text_document_position.text_document.uri.to_string();
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+    let ctx = lsp_context
+        .lsp
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
 
     let symbols = ctx
         .symbols()
@@ -658,7 +677,10 @@ fn completion(lsp_context: &LspContext, msg: Message) -> Result<Message, String>
 fn references(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
     let (id, params): (RequestId, ReferenceParams) = extract_req(msg, References::METHOD);
     let uri = params.text_document_position.text_document.uri.to_string();
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+    let ctx = lsp_context
+        .lsp
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
     let loc = crate::lsp::Location::from(params.text_document_position.position);
     let refs = ctx.references(&loc).ok_or("No references found")?;
     let symbol = ctx.symbol(&loc).ok_or("No symbol found")?;
@@ -701,23 +723,21 @@ fn references(lsp_context: &LspContext, msg: Message) -> Result<Message, String>
 fn diagnostics(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
     let (id, params): (RequestId, DocumentDiagnosticParams) =
         extract_req(msg, DocumentDiagnosticRequest::METHOD);
-    let p_error = lsp_context
-        .error
-        .get(params.text_document.uri.as_str())
-        .ok_or("document not found")?;
+    let p_error = lsp_context.error.get(params.text_document.uri.as_str());
     let e: Vec<Diagnostic> = match p_error {
         None => vec![],
-        Some(x) => vec![x.clone().into()],
+        Some(x) => match x {
+            Some(x) => vec![x.clone().into()],
+            None => vec![],
+        },
     };
 
     let uri = params.text_document.uri.to_string();
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
-    let items = ctx
-        .diagnostics()
-        .into_iter()
-        .map(|x| x.into())
-        .chain(e)
-        .collect();
+    let ctx = lsp_context.lsp.get(&uri);
+    let warnings = ctx.map_or(vec![], |x| {
+        x.diagnostics().into_iter().map(|x| x.into()).collect()
+    });
+    let items = warnings.into_iter().chain(e).collect::<Vec<_>>();
     let report = FullDocumentDiagnosticReport {
         items,
         result_id: None,
@@ -738,7 +758,10 @@ fn hover(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
         .uri
         .to_string();
 
-    let ctx = lsp_context.lsp.get(&uri).ok_or("No document found")?;
+    let ctx = lsp_context
+        .lsp
+        .get(&uri)
+        .ok_or(format!("{} not found", &uri))?;
 
     let hover = match ctx.hover(&Location::from(
         params.text_document_position_params.position,
