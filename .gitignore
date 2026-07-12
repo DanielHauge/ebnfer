@@ -1,1 +1,9 @@
 /target
+/editors/vscode/.vscode-test
+/editors/vscode/dist
+/editors/vscode/node_modules
+/editors/vscode/out
+/editors/vscode/server/ebnfer
+/editors/vscode/server/ebnfer.exe
+/editors/vscode/*.vsix
+**/lsp.log

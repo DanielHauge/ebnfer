@@ -1,0 +1,11 @@
+.github/**
+.vscode/**
+src/**
+out/**
+scripts/**
+test-fixtures/**
+*.vsix
+esbuild.mjs
+tsconfig*.json
+server/.gitkeep
+dist/*.map

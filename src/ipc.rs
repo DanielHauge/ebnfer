@@ -22,8 +22,9 @@ use lsp_types::{
 };
 use lsp_types::{
     Diagnostic, DiagnosticOptions, DiagnosticSeverity, DiagnosticTag, DocumentDiagnosticParams,
-    FileSystemWatcher, FullDocumentDiagnosticReport, GlobPattern, ReferenceParams, Registration,
-    RegistrationParams, SemanticToken, SemanticTokenModifier, SemanticTokenType,
+    DocumentDiagnosticReport, DocumentDiagnosticReportResult, FileSystemWatcher,
+    FullDocumentDiagnosticReport, GlobPattern, ReferenceParams, Registration, RegistrationParams,
+    RelatedFullDocumentDiagnosticReport, SemanticToken, SemanticTokenModifier, SemanticTokenType,
     SemanticTokensLegend, SemanticTokensResult, Uri, WorkspaceFoldersServerCapabilities,
     WorkspaceServerCapabilities,
 };
@@ -201,10 +202,13 @@ pub fn handle_conn(
                     |rqs, func: fn(ctx: &LspContext, msg: Message) -> Result<Message, String>| {
                         match func(&lsp_context, Message::Request(rqs)) {
                             Ok(x) => connection.sender.send(x).or(Err("Failed to send")),
-                            Err(e) => connection
-                                .sender
-                                .send(error(&e, req_id))
-                                .or(Err("Failed to send")),
+                            Err(e) => {
+                                log_file(&format!("Request failed: {e}"));
+                                connection
+                                    .sender
+                                    .send(error(&e, req_id))
+                                    .or(Err("Failed to send"))
+                            }
                         }
                     };
 
@@ -501,8 +505,8 @@ fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
                         character: x.1.col as u32,
                     },
                     end: lsp_types::Position {
-                        line: x.2.line as u32,
-                        character: x.2.col as u32,
+                        line: x.1.line as u32,
+                        character: x.1.col as u32 + x.0.len() as u32,
                     },
                 },
                 children: Some(
@@ -512,8 +516,7 @@ fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
                             let alternative_hovers = ctx.hover_alternatives(&y);
                             let doc_symbols: Vec<DocumentSymbol> = alternative_hovers
                                 .into_iter()
-                                .map(|h| {
-                                    let hover_len = h.len();
+                                .map(|_| {
                                     DocumentSymbol {
                                         deprecated: None, //Deprecated, use tags
                                         detail: None,
@@ -538,7 +541,7 @@ fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
                                             },
                                             end: lsp_types::Position {
                                                 line: y.line as u32,
-                                                character: y.col as u32 + hover_len as u32,
+                                                character: y.col as u32 + x.0.len() as u32,
                                             },
                                         },
                                     }
@@ -840,10 +843,15 @@ fn diagnostics(lsp_context: &LspContext, msg: Message) -> Result<Message, String
         .into_iter()
         .map(Diagnostic::from)
         .collect();
-    let report = FullDocumentDiagnosticReport {
-        items,
-        result_id: None,
-    };
+    let report = DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
+        RelatedFullDocumentDiagnosticReport {
+            related_documents: None,
+            full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                items,
+                result_id: None,
+            },
+        },
+    ));
     let json_result = serde_json::to_value(report).expect("Failed to serialize");
     Ok(Message::Response(Response {
         id,

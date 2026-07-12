@@ -1,0 +1,165 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "EBNF",
+  "scopeName": "source.ebnf",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#terminals"
+    },
+    {
+      "include": "#special-sequences"
+    },
+    {
+      "include": "#definitions"
+    },
+    {
+      "include": "#integers"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#identifiers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.ebnf",
+          "begin": "\\(\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.begin.ebnf"
+            }
+          },
+          "end": "\\*\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.end.ebnf"
+            }
+          }
+        }
+      ]
+    },
+    "terminals": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.ebnf",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.ebnf"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.ebnf"
+            }
+          }
+        },
+        {
+          "name": "string.quoted.single.ebnf",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.ebnf"
+            }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.ebnf"
+            }
+          }
+        }
+      ]
+    },
+    "special-sequences": {
+      "patterns": [
+        {
+          "name": "string.other.special-sequence.ebnf",
+          "begin": "\\?",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.ebnf"
+            }
+          },
+          "end": "\\?",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.ebnf"
+            }
+          }
+        }
+      ]
+    },
+    "definitions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.rule.ebnf",
+          "match": "\\b[A-Za-z][A-Za-z0-9_]*\\b(?=\\s*=)"
+        }
+      ]
+    },
+    "integers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.integer.ebnf",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.ebnf",
+          "match": "[=|,;*\\-]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.group.begin.ebnf",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.group.end.ebnf",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.section.optional.begin.ebnf",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.section.optional.end.ebnf",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.section.repetition.begin.ebnf",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.repetition.end.ebnf",
+          "match": "\\}"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.rule-reference.ebnf",
+          "match": "\\b[A-Za-z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}

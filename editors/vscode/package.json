@@ -1,0 +1,88 @@
+{
+  "name": "ebnfer",
+  "displayName": "EBNFER",
+  "description": "Language support for EBNF grammars powered by ebnfer.",
+  "version": "0.1.0",
+  "publisher": "DanielHauge",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DanielHauge/ebnfer.git"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "ebnf",
+    "grammar",
+    "language-server",
+    "lsp"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onLanguage:ebnf"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ebnf",
+        "aliases": [
+          "EBNF",
+          "ebnf"
+        ],
+        "extensions": [
+          ".ebnf"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ebnf",
+        "scopeName": "source.ebnf",
+        "path": "./syntaxes/ebnf.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "EBNFER",
+      "properties": {
+        "ebnfer.server.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "Optional path to an ebnfer executable. Leave empty to use the bundled server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true }); require('node:fs').rmSync('out', { recursive: true, force: true })\"",
+    "check-version": "node ./scripts/check-version.mjs",
+    "check": "npm run check-version && tsc --noEmit",
+    "build": "node ./esbuild.mjs",
+    "compile-tests": "tsc -p ./tsconfig.test.json",
+    "test:unit": "npm run compile-tests && node --test out/test/unit/grammar.test.js out/test/unit/serverPath.test.js",
+    "test:integration": "npm run build && npm run compile-tests && node ./out/test/runTest.js",
+    "test": "npm run check && npm run build && npm run test:unit",
+    "package": "npm run test && vsce package",
+    "package:target": "node ./scripts/package-target.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.9.2",
+    "adm-zip": "^0.5.16",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "vscode-languageclient": "^10.1.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.2.0"
+  }
+}

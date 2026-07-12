@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package-vscode:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-musl
+            vscode_target: linux-x64
+            executable: ebnfer
+          - runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-musl
+            vscode_target: linux-arm64
+            executable: ebnfer
+          - runner: macos-15-intel
+            rust_target: x86_64-apple-darwin
+            vscode_target: darwin-x64
+            executable: ebnfer
+          - runner: macos-15
+            rust_target: aarch64-apple-darwin
+            vscode_target: darwin-arm64
+            executable: ebnfer
+          - runner: windows-2025
+            rust_target: x86_64-pc-windows-msvc
+            vscode_target: win32-x64
+            executable: ebnfer.exe
+          - runner: windows-11-arm
+            rust_target: aarch64-pc-windows-msvc
+            vscode_target: win32-arm64
+            executable: ebnfer.exe
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install musl tools
+        if: startsWith(matrix.vscode_target, 'linux-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+
+      - name: Install Rust target
+        run: rustup target add "${{ matrix.rust_target }}"
+
+      - name: Test language server
+        run: cargo test --locked --target "${{ matrix.rust_target }}"
+
+      - name: Build language server
+        run: cargo build --locked --release --target "${{ matrix.rust_target }}"
+
+      - name: Install extension dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Check extension and release version
+        working-directory: editors/vscode
+        run: npm test
+
+      - name: Package target-specific VSIX
+        working-directory: editors/vscode
+        run: node scripts/package-target.mjs "${{ matrix.vscode_target }}" "../../target/${{ matrix.rust_target }}/release/${{ matrix.executable }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ebnfer-${{ matrix.vscode_target }}
+          path: editors/vscode/ebnfer-${{ matrix.vscode_target }}.vsix
+          if-no-files-found: error
+
+  github-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package-vscode
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ebnfer-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 ||
+            gh release create "${GITHUB_REF_NAME}" --generate-notes
+          gh release upload "${GITHUB_REF_NAME}" artifacts/*.vsix --clobber

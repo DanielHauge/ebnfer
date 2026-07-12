@@ -1,0 +1,12 @@
+(* grammar comment *)
+Grammar = 2 * Rule
+        | [ Optional ]
+        | { Repeated }
+        | ( Grouped )
+        | "double terminal"
+        | 'single terminal'
+        | ? special sequence ?
+        | 'a' - 'z'
+        ;
+
+Partial = "unfinished

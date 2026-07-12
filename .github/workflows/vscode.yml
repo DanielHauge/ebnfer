@@ -1,0 +1,52 @@
+name: VS Code
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  extension:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Build language server
+        run: cargo build --locked --release
+
+      - name: Install extension dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Check and test extension
+        working-directory: editors/vscode
+        run: npm test
+
+      - name: Stage bundled server
+        working-directory: editors/vscode
+        run: node scripts/stage-server.mjs ../../target/release/ebnfer
+
+      - name: Run VS Code integration test
+        working-directory: editors/vscode
+        run: xvfb-run -a npm run test:integration
+
+      - name: Package development VSIX
+        working-directory: editors/vscode
+        run: node scripts/package-target.mjs linux-x64 ../../target/release/ebnfer
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ebnfer-linux-x64-development
+          path: editors/vscode/ebnfer-linux-x64.vsix
+          if-no-files-found: error

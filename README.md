@@ -30,36 +30,42 @@ Build from source or install via cargo:
 cargo install ebnfer
 ```
 
-### Use w. Neovim (0.10.0)
+### Visual Studio Code
 
-Add ebnf as file type by adding the following to config: (`init.lua` fx.)
+Download the VSIX matching your platform and architecture from the GitHub
+release, then install it:
+
+```bash
+code --install-extension ebnfer-<platform>.vsix
+```
+
+The extension includes the language server, EBNF syntax highlighting, and
+editor configuration. Set `ebnfer.server.path` only when you want to override
+the bundled executable.
+
+### Neovim 0.11+
+
+Install `ebnfer` with Cargo, then add the EBNF filetype and LSP configuration:
 
 ```lua
-vim.filetype.add {
+vim.filetype.add({
     extension = {
         ebnf = "ebnf",
     },
-}
-```
-
-Add lsp attach with the following lua (N.B: cmd should have `.exe` suffix on windows):
-
-```lua
-vim.api.nvim_create_autocmd("FileType", {
-    pattern = "ebnf",
-    callback = function()
-        vim.lsp.buf_attach_client(
-            0,
-            vim.lsp.start_client {
-                name = "ebnfer",
-                cmd = { "ebnfer" },
-                on_attach = on_attach,
-                capabilities = capabilities,
-            }
-        )
-    end,
 })
+
+vim.lsp.config("ebnfer", {
+    cmd = { vim.fn.has("win32") == 1 and "ebnfer.exe" or "ebnfer" },
+    filetypes = { "ebnf" },
+    root_markers = { ".ebnfer-root", ".git" },
+})
+
+vim.lsp.enable("ebnfer")
 ```
+
+Use `:checkhealth vim.lsp` to confirm that the server attached. An optional
+`.ebnfer-root` file can define the grammar workspace when the files are not
+inside a Git repository.
 
 ## Workspaces
 
@@ -72,7 +78,7 @@ override their on-disk files until they are closed.
 
 ## Further development
 
-- [ ] Vs Code extension - w. general document highlighting
+- [ ] Publish the VS Code extension to the Marketplace and Open VSX
 
 ## Inspired
 
