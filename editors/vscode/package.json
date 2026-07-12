@@ -71,7 +71,8 @@
     "test:integration": "npm run build && npm run compile-tests && node ./out/test/runTest.js",
     "test": "npm run check && npm run build && npm run test:unit",
     "package": "npm run test && vsce package",
-    "package:target": "node ./scripts/package-target.mjs"
+    "package:target": "node ./scripts/package-target.mjs",
+    "publish:marketplace": "node ./scripts/publish-marketplace.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -23,6 +23,27 @@ Release tags must match both `Cargo.toml` and this extension's `package.json`.
 The release workflow produces six target-specific VSIX files. Upload the full
 set together when publishing manually to the Visual Studio Marketplace.
 
+## Publish to the Visual Studio Marketplace
+
+Create a Marketplace token with `Marketplace > Manage` permission, download
+all six VSIX files from the GitHub release into one directory, then run:
+
+```console
+npm ci
+read -s VSCE_PAT && export VSCE_PAT
+npm run publish:marketplace -- /path/to/vsix-files
+```
+
+The script refuses to publish unless the complete platform set exists and every
+package matches the extension publisher, name, and version. Validate without
+publishing with:
+
+```console
+npm run publish:marketplace -- /path/to/vsix-files --dry-run
+```
+
+Use `--skip-duplicate` when retrying a partially completed publication.
+
 ## Development
 
 ```console
