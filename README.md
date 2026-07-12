@@ -18,6 +18,7 @@ An implementation of the language server protocol (LSP) for EBNF grammars.
 - [x] Document symbols
 - [x] Code actions (supress unused warning)
 - [x] Formatting
+- [x] Workspace support - multiple files
 
 <https://github.com/user-attachments/assets/f084e652-b4f3-4f9c-a8e5-1cce6fb85e06>
 
@@ -60,10 +61,18 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 ```
 
+## Workspaces
+
+All `.ebnf` files below an LSP workspace folder are indexed recursively and
+share one rule namespace. Definitions, references, hover, completion,
+diagnostics, rename, and go-to-definition work across files.
+
+Multi-root workspace folders remain independent namespaces. Open editor buffers
+override their on-disk files until they are closed.
+
 ## Further development
 
 - [ ] Vs Code extension - w. general document highlighting
-- [ ] Workspace support - multiple files
 
 ## Inspired
 

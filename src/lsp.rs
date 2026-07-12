@@ -206,6 +206,7 @@ impl AnalysisContext {
         line_offset + location.col
     }
 
+    #[cfg(test)]
     fn unused_defs(&self) -> Vec<LspError> {
         self.definitions
             .keys()
@@ -247,6 +248,7 @@ impl AnalysisContext {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn root_rule(&self) -> Option<(Location, Location)> {
         let unused_defs = self.unused_defs();
         if unused_defs.len() == 1 {
@@ -270,6 +272,7 @@ impl AnalysisContext {
         }
     }
 
+    #[cfg(test)]
     pub fn diagnostics(&self) -> Vec<LspError> {
         let unused_defs = self.unused_defs();
         let undefined_refs: Vec<LspError> = self
@@ -307,10 +310,81 @@ impl AnalysisContext {
         diagnostics
     }
 
-    pub fn hover_from_def(&self, str: &str) -> Option<String> {
-        self.hover.get(str).cloned()
+    pub fn definition_occurrences(&self) -> Vec<(String, Location)> {
+        let mut definitions = self
+            .definitions
+            .iter()
+            .flat_map(|(name, location)| {
+                self.alternative_definitions
+                    .get(name)
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .chain(std::iter::once(location.clone()))
+                    .map(|location| (name.clone(), location))
+            })
+            .collect::<Vec<_>>();
+        definitions.sort_by(|a, b| {
+            a.1.line
+                .cmp(&b.1.line)
+                .then(a.1.col.cmp(&b.1.col))
+                .then(a.0.cmp(&b.0))
+        });
+        definitions
     }
 
+    pub fn reference_occurrences(&self) -> Vec<(String, Location)> {
+        let mut references = self
+            .references
+            .iter()
+            .flat_map(|(name, locations)| {
+                locations
+                    .iter()
+                    .cloned()
+                    .map(|location| (name.clone(), location))
+            })
+            .collect::<Vec<_>>();
+        references.sort_by(|a, b| {
+            a.1.line
+                .cmp(&b.1.line)
+                .then(a.1.col.cmp(&b.1.col))
+                .then(a.0.cmp(&b.0))
+        });
+        references
+    }
+
+    pub fn hover_occurrences(&self) -> Vec<(String, Location, String)> {
+        let mut hovers = self
+            .definitions
+            .iter()
+            .flat_map(|(name, location)| {
+                let alternative_locations =
+                    self.alternative_definitions.get(name).into_iter().flatten();
+                let alternative_hovers = self.alternative_hover.get(name).into_iter().flatten();
+                alternative_locations
+                    .zip(alternative_hovers)
+                    .map(|(location, hover)| (name.clone(), location.clone(), hover.clone()))
+                    .chain(std::iter::once((
+                        name.clone(),
+                        location.clone(),
+                        self.hover.get(name).cloned().unwrap_or_default(),
+                    )))
+            })
+            .collect::<Vec<_>>();
+        hovers.sort_by(|a, b| {
+            a.1.line
+                .cmp(&b.1.line)
+                .then(a.1.col.cmp(&b.1.col))
+                .then(a.0.cmp(&b.0))
+        });
+        hovers
+    }
+
+    pub fn is_unused_suppressed(&self, name: &str) -> bool {
+        self.supress_unused_rule.contains(name)
+    }
+
+    #[cfg(test)]
     pub fn hover(&self, location: &Location) -> Option<&str> {
         let offset = self.offset_at_location(location);
         let symbol = self.symbols.get(&offset)?;
@@ -330,6 +404,7 @@ impl AnalysisContext {
         }
     }
 
+    #[cfg(test)]
     pub fn references(&self, location: &Location) -> Option<Vec<Location>> {
         let offset = self.offset_at_location(location);
         let symbol = self.symbols.get(&offset)?;
@@ -355,6 +430,7 @@ impl AnalysisContext {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn definition(&self, location: &Location) -> Option<&Location> {
         let offset = self.offset_at_location(location);
         let symbol = self.symbols.get(&offset)?;
