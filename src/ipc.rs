@@ -30,9 +30,7 @@ use lsp_types::{
 };
 use lsp_types::{InitializeParams, ServerCapabilities};
 
-use lsp_server::{
-    Connection, Message, Request as ServerRequest, RequestId, Response, ResponseError,
-};
+use lsp_server::{Connection, Message, Request as ServerRequest, RequestId, Response};
 use serde_json::Value;
 
 use crate::lsp::{Location, LspError};
@@ -340,15 +338,7 @@ pub fn handle_conn(
 }
 
 fn error(msg: &str, id: RequestId) -> Message {
-    Message::Response(Response {
-        id,
-        result: None,
-        error: Some(ResponseError {
-            code: 1,
-            message: msg.to_string(),
-            data: None,
-        }),
-    })
+    Message::Response(Response::new_err(id, 1, msg.to_string()))
 }
 
 fn request_diagnostic_refresh(
@@ -370,11 +360,7 @@ fn request_diagnostic_refresh(
 
 fn response<T: serde::Serialize>(id: RequestId, result: T) -> Result<Message, String> {
     let result = serde_json::to_value(result).map_err(|error| error.to_string())?;
-    Ok(Message::Response(Response {
-        id,
-        result: Some(result),
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, result)))
 }
 
 impl From<Position> for Location {
@@ -558,11 +544,7 @@ fn symbols(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
 
     let resp = lsp_types::DocumentSymbolResponse::Nested(symbol_infos);
     let json_result = serde_json::to_value(resp).expect("Failed to serialize");
-    Ok(Message::Response(Response {
-        id,
-        result: Some(json_result),
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, json_result)))
 }
 
 fn code_actions(_lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
@@ -613,11 +595,7 @@ fn code_actions(_lsp_context: &LspContext, msg: Message) -> Result<Message, Stri
     }
 
     let json_result = serde_json::to_value(result).expect("Failed to serialize");
-    Ok(Message::Response(Response {
-        id,
-        result: Some(json_result),
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, json_result)))
 }
 
 fn semantic_tokens(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
@@ -659,11 +637,7 @@ fn rename_prepare(lsp_context: &LspContext, msg: Message) -> Result<Message, Str
         }
         None => None,
     };
-    Ok(Message::Response(Response {
-        id,
-        result,
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, result)))
 }
 
 fn rename(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
@@ -708,11 +682,7 @@ fn rename(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
         change_annotations: None,
     };
     let json_result = serde_json::to_value(resp).expect("Failed to serialize");
-    Ok(Message::Response(Response {
-        id,
-        result: Some(json_result),
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, json_result)))
 }
 
 fn format(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
@@ -726,15 +696,11 @@ fn format(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
     let formatted = ctx.format();
 
     match formatted {
-        None => Ok(Message::Response(Response {
+        None => Ok(Message::Response(Response::new_err(
             id,
-            result: None,
-            error: Some(ResponseError {
-                code: 1,
-                message: "Failed to format".to_string(),
-                data: None,
-            }),
-        })),
+            1,
+            "Failed to format".to_string(),
+        ))),
         Some(x) => {
             let resp: Vec<lsp_types::TextEdit> = vec![lsp_types::TextEdit {
                 range: lsp_types::Range {
@@ -751,11 +717,7 @@ fn format(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
             }];
             log_file(&format!("{resp:?}"));
             let json_result = serde_json::to_value(resp).expect("Failed to serialize");
-            Ok(Message::Response(Response {
-                id,
-                result: Some(json_result),
-                error: None,
-            }))
+            Ok(Message::Response(Response::new_ok(id, json_result)))
         }
     }
 }
@@ -788,11 +750,7 @@ fn completion(lsp_context: &LspContext, msg: Message) -> Result<Message, String>
         .collect::<Vec<_>>();
     let resp = lsp_types::CompletionResponse::Array(symbols);
     let json_result = serde_json::to_value(resp).expect("Failed to serialize");
-    Ok(Message::Response(Response {
-        id,
-        result: Some(json_result),
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, json_result)))
 }
 
 fn references(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
@@ -827,11 +785,7 @@ fn references(lsp_context: &LspContext, msg: Message) -> Result<Message, String>
     let json_result = serde_json::to_value(ref_response)
         .ok()
         .ok_or("Failed to serialize")?;
-    Ok(Message::Response(Response {
-        id,
-        result: Some(json_result),
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, json_result)))
 }
 
 fn diagnostics(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
@@ -853,11 +807,7 @@ fn diagnostics(lsp_context: &LspContext, msg: Message) -> Result<Message, String
         },
     ));
     let json_result = serde_json::to_value(report).expect("Failed to serialize");
-    Ok(Message::Response(Response {
-        id,
-        result: Some(json_result),
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, json_result)))
 }
 
 fn hover(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
@@ -866,13 +816,7 @@ fn hover(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
     let location = Location::from(params.text_document_position_params.position);
     let symbol = match lsp_context.workspace.symbol(&uri, &location) {
         Some(symbol) => symbol,
-        None => {
-            return Ok(Message::Response(Response {
-                id,
-                result: None,
-                error: None,
-            }))
-        }
+        None => return Ok(Message::Response(Response::new_ok(id, ()))),
     };
     let mut hovers = lsp_context
         .workspace
@@ -902,11 +846,7 @@ fn hover(lsp_context: &LspContext, msg: Message) -> Result<Message, String> {
 
     let result = Some(resp);
     let json_result = serde_json::to_value(result).expect("Failed to serialize");
-    Ok(Message::Response(Response {
-        id,
-        result: Some(json_result),
-        error: None,
-    }))
+    Ok(Message::Response(Response::new_ok(id, json_result)))
 }
 
 fn extract_req<T>(msg: Message, method: &str) -> (RequestId, T)
